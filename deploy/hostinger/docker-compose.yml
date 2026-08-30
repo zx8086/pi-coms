@@ -1,0 +1,49 @@
+# deploy/hostinger/docker-compose.yml
+#
+# The coms-net hub on server.siobytes.cloud.
+#
+# Published at https://coms.siobytes.cloud through the box's existing Traefik,
+# which already holds a *.siobytes.cloud wildcard cert (Hostinger DNS-01), so
+# this needs no DNS record and no ACME wait.
+#
+# The port binds to 127.0.0.1 deliberately. Traefik runs network_mode: host, so
+# it reaches the hub over loopback -- and nothing else can. That replaces the
+# whole CloudFront prefix-list + X-Origin-Verify arrangement the AWS stack
+# needed to keep its origin private.
+
+services:
+  coms-hub:
+    build:
+      context: ../..
+      dockerfile: deploy/hub/Dockerfile
+    image: pi-coms-hub:latest
+    container_name: coms-hub
+    restart: unless-stopped
+
+    # Loopback only. See above.
+    ports:
+      - "127.0.0.1:8787:8787"
+
+    environment:
+      PI_COMS_NET_HOST: 0.0.0.0          # inside the container namespace
+      PI_COMS_NET_PORT: "8787"
+      PI_COMS_NET_PUBLIC_URL: https://coms.siobytes.cloud
+      PI_COMS_NET_LOG_HEARTBEAT: "0"
+
+    # The server reads PI_COMS_NET_AUTH_TOKEN from the environment and has no
+    # _FILE variant, so the token comes from an env_file rather than a Docker
+    # secret. The file is 0600 root-owned on the host and gitignored.
+    env_file:
+      - /root/.secrets/server-siobytes-cloud/coms-net-hub.env
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+

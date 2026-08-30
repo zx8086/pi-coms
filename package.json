@@ -1,0 +1,6 @@
+{
+  "name": "pi-coms",
+  "private": true,
+  "type": "module",
+  "description": "Peer-to-peer communication for Pi Coding Agent instances, with multi-account AWS deployment"
+}

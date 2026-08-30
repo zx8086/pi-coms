@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+*.swp
+*.swo
+
+# API keys -- never commit real credentials
+.env
+
+.pi/agent-sessions/
+tmp/

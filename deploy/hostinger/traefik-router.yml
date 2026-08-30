@@ -1,0 +1,32 @@
+# deploy/hostinger/traefik-router.yml
+#
+# Merge these two blocks into /srv/traefik/dynamic/routers.yml on the VPS.
+# Traefik watches that directory, so a save is enough -- no restart.
+#
+# No basicAuth middleware here, unlike the other routers on this box. The hub
+# authenticates every /v1/* route itself with a bearer token compared in
+# constant time, and /health is intentionally open for the healthcheck. Adding
+# basicAuth on top would break the Pi clients, which send only the bearer.
+
+http:
+  routers:
+
+    # coms-net hub -- Docker container bound to 127.0.0.1:8787
+    coms-hub:
+      rule: Host(`coms.siobytes.cloud`)
+      entryPoints: [websecure]
+      service: coms-hub
+      middlewares: [security-headers@file]
+      tls:
+        certResolver: letsencrypt
+
+  services:
+
+    coms-hub:
+      loadBalancer:
+        # Traefik is network_mode: host, so loopback reaches the published
+        # container port directly. This is the stable-address pattern the
+        # sftpgo comment in routers.yml recommends over container IPs.
+        passHostHeader: false
+        servers:
+          - url: http://127.0.0.1:8787

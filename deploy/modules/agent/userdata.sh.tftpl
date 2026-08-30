@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# deploy/modules/agent/userdata.sh.tftpl
+#
+# Thin shim: fetch the repo, set the environment contract, and hand off to the
+# shared bootstrap (deploy/bootstrap/agent-bootstrap.sh). All real logic lives
+# there so AWS and VPS hosts run identical code.
+set -euo pipefail
+
+exec > >(tee /var/log/pi-agent-bootstrap.log) 2>&1
+echo "=== pi agent userdata shim $(date -Is) ==="
+
+dnf install -y git
+
+rm -rf /opt/pi-bootstrap
+git clone --depth 1 '${repo_url}' /opt/pi-bootstrap
+
+export SECRETS_SOURCE=aws
+export COMS_TOKEN_SECRET_ARN='${token_secret_arn}'
+export PROVIDER_KEYS_SECRET_ARN='${keys_secret_arn}'
+export AWS_REGION='${region}'
+export AWS_ACCOUNT_ID='${account_id}'
+export PI_COMS_NET_SERVER_URL='${hub_url}'
+export AGENT_NAME='${agent_name}'
+export AGENT_PURPOSE='${agent_purpose}'
+export PI_MODEL='${pi_model}'
+export COMS_PROJECT='${coms_project}'
+export SSH_PUBLIC_KEY='${ssh_public_key}'
+export REPO_URL='${repo_url}'
+
+bash /opt/pi-bootstrap/deploy/bootstrap/agent-bootstrap.sh
