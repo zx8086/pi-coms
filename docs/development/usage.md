@@ -45,8 +45,9 @@ just coms --name laptop --cname laptop
 From any client session, natural language drives the tools:
 
 - "ask aws-356994971776 how many RDS instances it sees" -- the model calls `coms_net_send` to that peer and `coms_net_await` for the reply.
-- Prefixing works too: `aws-356994971776: what EC2 instances are running?` reads as an instruction to route there. The prefix is interpreted by the model, not parsed by the extension, so phrasing is flexible; only the peer name must match `coms_net_list` exactly.
 - "ask everyone to summarize their environment" -- `coms_net_broadcast` fans out and returns each reply under its peer name.
+
+Use an explicit verb ("ask ...", "send ... this:"). A bare `name:` prefix (`aws-356994971776: what is running?`) is interpreted by the model, not parsed by the extension -- and smaller models misread it as an *incoming* message from that peer and answer locally without sending anything. Two ways to confirm a message really went out: the `coms_net_send` tool call renders in your session, and the hub log shows a `laptop → <peer>` line. Real inbound messages always carry the marker `[inbound coms-net message from <name> @ <path>]`; text without that marker did not come from a peer.
 
 Replies to inbound messages are automatic: when a peer prompts your session, answer as a normal message. Never call `coms_net_send` to reply; the extension submits your turn output back to the caller.
 
