@@ -2,5 +2,12 @@
   "name": "pi-coms",
   "private": true,
   "type": "module",
-  "description": "Peer-to-peer communication for Pi Coding Agent instances, with multi-account AWS deployment"
+  "description": "Peer-to-peer communication for Pi Coding Agent instances, with multi-account AWS deployment",
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.1121.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1121.0",
+    "@aws-sdk/client-cost-explorer": "^3.1121.0",
+    "@aws-sdk/client-ec2": "^3.1121.0",
+    "zod": "^4.5.4"
+  }
 }

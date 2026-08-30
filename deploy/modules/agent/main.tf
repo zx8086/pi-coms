@@ -127,6 +127,21 @@ resource "aws_iam_role_policy" "agent_cloudwatch_read" {
   })
 }
 
+// The monitor's daily cost check. Cost Explorer has no resource-level scoping.
+resource "aws_iam_role_policy" "agent_cost_read" {
+  name = "cost-explorer-read"
+  role = aws_iam_role.agent.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ce:GetCostAndUsage"]
+      Resource = "*"
+    }]
+  })
+}
+
 // SSM Session Manager: shell access with no inbound port and no SSH key.
 resource "aws_iam_role_policy_attachment" "agent_ssm" {
   role       = aws_iam_role.agent.name

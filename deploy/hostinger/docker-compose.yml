@@ -36,6 +36,10 @@ services:
     env_file:
       - /root/.secrets/server-siobytes-cloud/coms-net-hub.env
 
+    # Mailbox durability: messages.db survives container recreation.
+    volumes:
+      - coms-hub-mail:/home/bun/.pi/coms-net
+
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
       interval: 30s
@@ -46,4 +50,7 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  coms-hub-mail:
 

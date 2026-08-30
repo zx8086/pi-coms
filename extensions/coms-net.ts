@@ -113,13 +113,14 @@ interface SendRequest {
 	conversation_id: string | null;
 	response_schema: object | null;
 	hops: number;
+	ttl_ms?: number | null;
 }
 
 interface SendResponse {
 	ok: true;
 	msg_id: string;
 	status: MessageStatus;
-	target_session: string;
+	target_session: string | null;
 }
 
 interface ResponseSubmitRequest {
@@ -145,7 +146,7 @@ interface PendingReply {
 	promise: Promise<{ response?: any; error?: string | null }>;
 	result?: { response?: any; error?: string | null };
 	target_name?: string;
-	target_session?: string;
+	target_session?: string | null;
 	created_at: string;
 }
 
@@ -1201,6 +1202,7 @@ export default function (pi: ExtensionAPI) {
 			prompt: Type.String({ description: "The prompt to send." }),
 			conversation_id: Type.Optional(Type.String()),
 			response_schema: Type.Optional(Type.Any({ description: "Optional JSON Schema describing the expected response shape." })),
+			ttl_ms: Type.Optional(Type.Number({ description: "Optional TTL in ms. Beyond the server default (30 min) the message is queued durably for an offline peer name and delivered when it next registers. Capped by the server (default 7 days)." })),
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");
@@ -1219,6 +1221,7 @@ export default function (pi: ExtensionAPI) {
 				conversation_id: (params as any).conversation_id ?? null,
 				response_schema: ((params as any).response_schema as object | undefined) ?? null,
 				hops,
+				ttl_ms: typeof (params as any).ttl_ms === "number" && (params as any).ttl_ms > 0 ? (params as any).ttl_ms : null,
 			};
 
 			let resp: SendResponse;
@@ -1263,9 +1266,9 @@ export default function (pi: ExtensionAPI) {
 			return {
 				content: [{
 					type: "text" as const,
-					text: `coms_net_send → ${params.target}\nmsg_id ${msg_id}\nhops ${hops}`,
+					text: `coms_net_send → ${params.target}\nmsg_id ${msg_id}\nstatus ${resp.status}\nhops ${hops}`,
 				}],
-				details: { msg_id, target: params.target, target_session, hops },
+				details: { msg_id, target: params.target, target_session, status: resp.status, hops },
 			};
 		},
 		renderCall(args, theme) {
