@@ -20,8 +20,8 @@ like every other account.
 
 | Path | What it is |
 |---|---|
-| `bootstrap/agent-bootstrap.sh` | Shared agent bootstrap. All real install/launch logic; parameterized by `SECRETS_SOURCE=aws\|file`. |
-| `hub/Dockerfile` | The hub container. Runs anywhere with Docker; needs only `PI_COMS_NET_AUTH_TOKEN` and a public URL. |
+| `bootstrap/agent-bootstrap.sh` | Shared agent bootstrap. All real install/launch logic; parameterized by `SECRETS_SOURCE=aws\|file`. Installs `pi-agent.service` and `pi-monitor.service`. |
+| `hub/Dockerfile` | The hub container. Runs anywhere with Docker; needs only `PI_COMS_NET_AUTH_TOKEN` and a public URL. Mounts a volume for the sqlite mailbox. |
 | `hostinger/` | The live hub (`docker-compose.yml` behind Traefik) plus the VPS agent shim. |
 | `modules/agent/` | Terraform module: one Pi agent in one AWS account. IAM role, EC2 host, secrets, userdata shim. |
 | `accounts/<name>/` | One root per AWS account. Copy `accounts/poc`, set the profile, apply. |
@@ -43,12 +43,19 @@ like every other account.
    aws ec2 reboot-instances --instance-ids <id> --profile <name>
    ```
 5. From your laptop: `just coms --name me --cname me`, then `coms_net_list`
-   shows the new agent (default name `aws-<account_id>`).
+   shows the new agent (default name `aws-<account_id>`). The host also runs
+   `monitor-aws-<account_id>` (registered `--explicit`, so it is hidden from
+   lists unless named): scheduled alarm/log/drift/cost checks whose reports
+   reach `laptop` through the hub mailbox even while you are offline. See
+   `docs/architecture/monitoring.md`.
 
 Notes:
 
-- The instance clones `repo_url` at boot, so changes must be pushed there
-  before an apply picks them up.
+- The instance clones `repo_url` at boot (the repo's default branch), so
+  changes must be merged to `main` before an apply, reboot, or bootstrap
+  re-run picks them up. To update a live host, re-run the bootstrap over SSM:
+  `aws ssm send-command --instance-ids <id> --document-name AWS-RunShellScript
+  --parameters 'commands=["bash /var/lib/cloud/instance/user-data.txt"]'`.
 - Every agent shares one bearer token and one coms project; account isolation
   comes from names and IAM, not the namespace.
 - State is local and per-account under `accounts/<name>/`; it contains the

@@ -9,6 +9,7 @@ Project-specific documentation for pi-coms: peer-to-peer messaging between Pi Co
 | Understand the system | [System Overview](architecture/overview.md) |
 | See how messages flow | [Communication](architecture/communication.md) |
 | Trace ports, discovery, TLS | [Networking](architecture/networking.md) |
+| Understand the AWS monitor and mailbox | [Monitoring](architecture/monitoring.md) |
 | Review trust boundaries and IAM | [Security Model](security/security-model.md) |
 | Deploy the hub or an AWS agent | [Deployment](deployment/deployment.md) |
 | Run and address the fleet | [Usage](development/usage.md) |
@@ -24,6 +25,7 @@ Project-specific documentation for pi-coms: peer-to-peer messaging between Pi Co
 | [overview.md](architecture/overview.md) | Components, design principles, and the two transports |
 | [communication.md](architecture/communication.md) | Tool surface, message lifecycle, auto-reply, broadcast, safety rails |
 | [networking.md](architecture/networking.md) | Listeners, ports, discovery files, SSE channel, end-to-end wire path |
+| [monitoring.md](architecture/monitoring.md) | Per-account AWS monitor, hub mailbox (store-and-forward), checks, reports |
 
 ### Security
 
@@ -56,7 +58,8 @@ Project-specific documentation for pi-coms: peer-to-peer messaging between Pi Co
 | Aspect | Value |
 |--------|-------|
 | Transports | Unix sockets (`coms`), HTTP + SSE via hub (`coms-net`) |
-| Hub | `scripts/coms-net-server.ts`, single Bun container at https://coms.siobytes.cloud |
-| Agents | `devops` (VPS), one `aws-<account_id>` per applied AWS account |
+| Hub | `scripts/coms-net-server.ts`, single Bun container at https://coms.siobytes.cloud; sqlite mailbox for store-and-forward |
+| Agents | `devops` (VPS), one `aws-<account_id>` plus one `monitor-aws-<account_id>` per applied AWS account |
 | Tool surface | `*_list`, `*_send`, `*_get`, `*_await`, `coms_net_broadcast` |
 | Runtime | Bun; extensions load from source via Pi's jiti runtime, no build step |
+| Tests | `bun test` (unit + hub integration suite under `tests/`) |

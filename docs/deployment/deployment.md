@@ -19,6 +19,7 @@ devops (VPS) ───────┘
 | Hub | Docker on the VPS, behind Traefik | `deploy/hub/Dockerfile`, `deploy/hostinger/docker-compose.yml` |
 | VPS agent (`devops`) | systemd on the VPS | `deploy/hostinger/bootstrap-agent.sh` |
 | AWS agent (one per account) | EC2 via Terraform | `deploy/modules/agent/`, `deploy/accounts/<name>/` |
+| Account monitor (`pi-monitor.service`) | Same host as each agent | `scripts/coms-net-monitor.ts`, installed by the shared bootstrap |
 | Shared bootstrap | Both agent hosts | `deploy/bootstrap/agent-bootstrap.sh` |
 
 All install and launch logic lives in the shared bootstrap. The AWS userdata shim (`deploy/modules/agent/userdata.sh.tftpl`) and the VPS shim (`deploy/hostinger/bootstrap-agent.sh`) only set the environment contract documented at the top of `deploy/bootstrap/agent-bootstrap.sh:12-34` and hand off.
@@ -58,8 +59,9 @@ REPO_URL=https://github.com/zx8086/pi-coms.git \
 Operating notes:
 
 1. **Do not scale past one replica.** The registry and Server-Sent Events (SSE) connections live in process memory; a second container splits the registry.
-2. **Restarting the hub clears the registry.** Agents re-register on their next heartbeat (10 seconds).
-3. The healthcheck polls `http://127.0.0.1:8787/health` every 30 seconds (`deploy/hostinger/docker-compose.yml:39-44`).
+2. **Restarting the hub clears the registry but not the mail.** Agents re-register on their next heartbeat (10 seconds); queued mailbox messages reload from sqlite on boot.
+3. The mailbox lives on the named volume `coms-hub-mail` (mounted at `/home/bun/.pi/coms-net`), so store-and-forward messages survive container recreation. The Dockerfile pre-creates the directory owned by `bun` -- without that the volume mounts root-owned and sqlite cannot create `messages.db`.
+4. The healthcheck polls `http://127.0.0.1:8787/health` every 30 seconds (`deploy/hostinger/docker-compose.yml`).
 
 ---
 
@@ -98,7 +100,7 @@ aws ec2 reboot-instances --instance-ids <id> --profile <name>
 | Resource | Purpose |
 |----------|---------|
 | `aws_instance.agent` | t4g host, public IP, egress-only security group |
-| `aws_iam_role.agent` | `ViewOnlyAccess` + `AmazonSSMManagedInstanceCore` + inline policies |
+| `aws_iam_role.agent` | `ViewOnlyAccess` + `AmazonSSMManagedInstanceCore` + inline policies (CloudWatch/logs reads, `ce:GetCostAndUsage` for the monitor, boot secrets) |
 | `aws_secretsmanager_secret.coms_token` | Account-local copy of the hub token |
 | `aws_secretsmanager_secret.provider_keys` | Model provider API keys, created empty |
 
@@ -160,7 +162,19 @@ Both shims converge on the same sequence in `deploy/bootstrap/agent-bootstrap.sh
 
 1. Install Bun, Pi, and Herdr for the `piagent` user. The `pi` launcher is replaced with a Bun wrapper because the hosts have no Node (`deploy/bootstrap/agent-bootstrap.sh:74-93`).
 2. Resolve secrets from Secrets Manager (`SECRETS_SOURCE=aws`) or env files (`SECRETS_SOURCE=file`) into `~/.coms-env`, mode 0600. Provider keys may be empty on first boot; the agent still registers.
-3. Install `herdr.service` and `pi-agent.service`. The launch script (`~/bin/start-pi-agent.sh`) waits for Herdr and the hub, closes stale workspaces, starts Pi in a headless Herdr pane, and confirms readiness against the hub registry rather than Herdr's own detection.
+3. Install `herdr.service`, `pi-agent.service`, and `pi-monitor.service`. The launch script (`~/bin/start-pi-agent.sh`) waits for Herdr and the hub, closes stale workspaces, starts Pi in a headless Herdr pane, and confirms readiness against the hub registry rather than Herdr's own detection.
+
+`pi-monitor.service` is deliberately independent of `pi-agent.service`: it runs `bun scripts/coms-net-monitor.ts` directly (no Herdr, no Pi), sources `~/.coms-env` at start, and restarts on failure. A wedged agent never stops detection. See [Monitoring](../architecture/monitoring.md).
+
+To update an already-running host (new code, new units, refreshed secrets) re-run the whole bootstrap idempotently over SSM:
+
+```bash
+aws ssm send-command --instance-ids <id> --region <region> --profile <name> \
+  --document-name AWS-RunShellScript \
+  --parameters 'commands=["bash /var/lib/cloud/instance/user-data.txt"]'
+```
+
+That re-clones the shim repo, pulls `~/pi-coms`, runs `bun install`, rewrites the units, and restarts the services. Remember the host pulls this repository's **default branch**: changes must be merged to `main` before they can reach an agent host.
 
 ### Gotchas
 
@@ -182,15 +196,18 @@ curl -s -H "Authorization: Bearer $PI_COMS_NET_AUTH_TOKEN" \
   https://coms.siobytes.cloud/v1/agents
 ```
 
-Expected: `/health` returns HTTP 200; the agents list contains `devops` and one `aws-<account_id>` entry per applied account.
+Expected: `/health` returns HTTP 200; the agents list contains `devops` and one `aws-<account_id>` entry per applied account. Monitors register `--explicit`, so add `?include_explicit=true` to also see each `monitor-aws-<account_id>`.
 
 On an agent host:
 
 ```bash
-systemctl status herdr pi-agent
+systemctl status herdr pi-agent pi-monitor
 journalctl -u pi-agent -f
+journalctl -u pi-monitor -f   # first line logs the registered name and cron cadences
 tail /var/log/pi-agent-bootstrap.log   # AWS hosts; ends with "bootstrap complete"
 ```
+
+From any client session, `ask monitor-aws-<account_id> for status` should answer with its last run and unsent-report count without spending tokens on the monitor side.
 
 ---
 
@@ -198,6 +215,7 @@ tail /var/log/pi-agent-bootstrap.log   # AWS hosts; ends with "bootstrap complet
 
 - [System Overview](../architecture/overview.md)
 - [Networking](../architecture/networking.md)
+- [Monitoring](../architecture/monitoring.md) -- what `pi-monitor.service` does once installed
 - [Security Model](../security/security-model.md)
 - [Usage](../development/usage.md)
 - `deploy/README.md` and `deploy/hostinger/README.md` for operator-focused runbooks

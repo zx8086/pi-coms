@@ -83,12 +83,12 @@ All routes except `/health` require `Authorization: Bearer <token>`. Full behavi
 | GET | `/v1/agents` | List agents in a project |
 | POST | `/v1/agents/:session_id/heartbeat` | Liveness plus context/queue stats |
 | DELETE | `/v1/agents/:session_id` | Deregister |
-| POST | `/v1/messages` | Send a prompt to one target |
+| POST | `/v1/messages` | Send a prompt to one target; optional `ttl_ms` queues durably for an offline name (see [Monitoring](monitoring.md#the-hub-mailbox)) |
 | GET | `/v1/messages/:id` | Non-blocking status poll |
 | GET | `/v1/messages/:id/await` | Long-poll until terminal or timeout |
 | POST | `/v1/messages/:id/response` | Target submits the reply |
 
-A `server_id` change between `/health` polls means the hub restarted and its in-memory registry was lost.
+A `server_id` change between `/health` polls means the hub restarted and its in-memory registry was lost. Mailbox messages are not: non-terminal messages reload from `messages.db` on boot.
 
 ---
 
@@ -105,7 +105,7 @@ Each registered session holds one `GET /v1/events` stream open. The hub pushes:
 | `message_status` | Delivery state changes for messages this session sent |
 | `response` | A reply to a message this session sent |
 
-Keepalive comments go out every 15 seconds; the Bun server runs with `idleTimeout: 0` so streams are never cut by the runtime (`scripts/coms-net-server.ts:1465`). There is no event replay: a reconnect gets a fresh `hello` plus `pool_snapshot`, and a reconnect for the same session replaces the previous stream.
+Keepalive comments go out every 15 seconds; the Bun server runs with `idleTimeout: 0` so streams are never cut by the runtime. There is no event replay, with one deliberate exception: right after `hello` and `pool_snapshot`, the hub flushes the session's queued mailbox messages oldest-first as `prompt` events. Otherwise a reconnect gets fresh state only, and a reconnect for the same session replaces the previous stream.
 
 This channel is why every host only needs **outbound** connectivity. The hub never dials an agent; prompts ride the SSE stream the agent itself opened.
 
@@ -129,9 +129,9 @@ The EC2 host sits in a default-VPC public subnet with a public IP for egress and
 
 | Direction | Traffic | Path |
 |-----------|---------|------|
-| Outbound | Hub registration, heartbeats, SSE | HTTPS to `coms.siobytes.cloud` |
+| Outbound | Hub registration, heartbeats, SSE (agent and monitor each hold one stream) | HTTPS to `coms.siobytes.cloud` |
 | Outbound | Boot-time installs, repo clone | HTTPS to bun.sh, GitHub, herdr.dev |
-| Outbound | Secrets, AWS API queries | HTTPS to regional AWS endpoints |
+| Outbound | Secrets, AWS API queries, monitor checks | HTTPS to regional AWS endpoints (Cost Explorer: us-east-1) |
 | Inbound | None | Shell access is SSM Session Manager (outbound-initiated) |
 
 The VPS agent short-circuits Traefik entirely and talks to the hub over loopback (`http://127.0.0.1:8787`), so it keeps working while the cert or router is being changed (`deploy/hostinger/bootstrap-agent.sh:39-41`).

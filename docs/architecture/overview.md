@@ -19,15 +19,16 @@ devops (VPS) ───────┘
 |-----------|------|------|
 | Local transport | `extensions/coms.ts` | Same-machine peers over Unix sockets; file registry at `~/.pi/coms/` |
 | Networked client | `extensions/coms-net.ts` | HTTP + Server-Sent Events (SSE) client to a hub |
-| Hub | `scripts/coms-net-server.ts` | Bun HTTP server; in-memory registry and message relay |
-| Shared bootstrap | `deploy/bootstrap/agent-bootstrap.sh` | Installs and launches a cloud agent; shared by AWS and VPS |
+| Hub | `scripts/coms-net-server.ts` | Bun HTTP server; in-memory registry, message relay, sqlite mailbox for store-and-forward |
+| Monitor | `scripts/coms-net-monitor.ts` + `scripts/monitor/` | Per-host AWS checks on `Bun.cron`; reports via the mailbox (see [Monitoring](monitoring.md)) |
+| Shared bootstrap | `deploy/bootstrap/agent-bootstrap.sh` | Installs and launches a cloud agent and its monitor; shared by AWS and VPS |
 | Agent module | `deploy/modules/agent/` | Terraform: one EC2 agent per AWS account |
 | Theme module | `extensions/themeMap.ts` | Shared helper (not an extension); per-extension theme and title defaults |
 
 ## Design principles
 
 1. **Peers, not workers.** Every agent is a complete Pi session with its own model, tools, and working directory. Any peer can address any other by name.
-2. **The hub holds no power.** It relays messages and tracks liveness; it has no cloud permissions and stores nothing durable. All state is process memory, so it must run as exactly one instance.
+2. **The hub holds no power.** It relays messages and tracks liveness; it has no cloud permissions. The registry and streams are process memory (so it must run as exactly one instance), and its only durable state is the message mailbox -- a sqlite store-and-forward queue so long-TTL sends outlive restarts and offline recipients (see [Monitoring](monitoring.md#the-hub-mailbox)).
 3. **Outbound-only agents.** Cloud agents open an SSE stream to the hub and receive prompts over it. No agent host accepts inbound connections; account access is bounded by an IAM role, not by network position.
 4. **Replies are automatic.** An inbound prompt triggers a normal Pi turn; the final assistant message of that turn is submitted back to the caller by the extension. Tools are never used to reply (see [Communication](communication.md)).
 5. **One shared bootstrap.** All install and launch logic lives in one script parameterized by `SECRETS_SOURCE=aws|file`; the AWS userdata and VPS shims only set environment.
@@ -69,6 +70,7 @@ Extensions are standalone `.ts` files loaded from source through Pi's jiti runti
 
 - [Communication](communication.md) -- tool surface and message lifecycle
 - [Networking](networking.md) -- listeners, discovery, and the wire path
+- [Monitoring](monitoring.md) -- the AWS account monitor and the hub mailbox
 - [Security Model](../security/security-model.md)
 - [Deployment](../deployment/deployment.md)
 - [Usage](../development/usage.md)

@@ -50,6 +50,23 @@ From any client session, natural language drives the tools:
 
 Replies to inbound messages are automatic: when a peer prompts your session, answer as a normal message. Never call `coms_net_send` to reply; the extension submits your turn output back to the caller.
 
+### Durable sends
+
+`coms_net_send` accepts `ttl_ms`. Beyond the 30-minute default the message is queued durably for an offline peer name and delivered when that name next registers (capped at 7 days by the hub). Ask for it in natural language: "send aws-356994971776 a long-ttl message to run X when it comes back online".
+
+## Talking to the monitor
+
+Each AWS account also runs a monitor peer, `monitor-aws-<account_id>`, registered `--explicit` -- invisible to `coms_net_list` and broadcasts unless you name it (or pass `include_explicit`). It answers a fixed command set without a model:
+
+```
+ask monitor-aws-356994971776 to run-checks    # run the check families now
+... status                                    # liveness, last run, unsent reports
+... digest                                    # current daily digest on demand
+... history                                   # last findings (7 days)
+```
+
+Its incident reports and daily digest arrive addressed to `laptop` (configurable via `PI_MONITOR_REPORT_TO`) with a long TTL: if no `laptop` session is connected, they wait in the hub mailbox and flush into your next session automatically. A quiet day still produces the digest -- silence past a day means the monitor itself is down. Details: [Monitoring](../architecture/monitoring.md).
+
 ## In-session commands
 
 | Command | Effect |
@@ -95,7 +112,7 @@ Client-side knobs (defaults in `extensions/coms-net.ts:42-52` and `extensions/co
 | `PI_COMS_NET_MESSAGE_TTL_MS` / `PI_COMS_TIMEOUT_MS` | `1800000` | Await default and message expiry (30 min) |
 | `PI_COMS_DIR` | `~/.pi/coms` | Local-transport registry root (coms-net's root is fixed) |
 
-Hub-side variables are covered in [Networking](../architecture/networking.md#hub-listeners-and-ports).
+Hub-side variables are covered in [Networking](../architecture/networking.md#hub-listeners-and-ports); the mailbox cap `PI_COMS_NET_MAX_TTL_MS` and every `PI_MONITOR_*` knob are tabulated in [Monitoring](../architecture/monitoring.md#configuration).
 
 ## Watching a cloud agent
 
