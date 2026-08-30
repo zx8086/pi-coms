@@ -1,0 +1,115 @@
+# Usage
+
+Day-to-day operation: starting peers, connecting to the deployed hub, addressing the fleet, and the knobs that change behavior. Prerequisites and first-time setup are in the repository `README.md`.
+
+## Quick navigation
+
+| Need to... | Run |
+|------------|-----|
+| Two local peers, one machine | `just local-coms --name a` / `just local-coms --name b` |
+| Local hub plus networked peers | `just coms-net-server`, then `just coms --name dev --cname dev` |
+| Connect to the deployed hub | `./deploy/hostinger/connect.sh` |
+| Same, env only (no launch) | `source deploy/hostinger/connect.sh` |
+| List every just recipe | `just` |
+
+Pi does not auto-load `.env`; the `just` recipes do (`set dotenv-load`). Running `pi` directly requires `source .env` first.
+
+## Naming
+
+The agent name flag is `--cname`; Pi owns `--name` and resumes it across sessions. Pass both so the Pi session and the coms identity match:
+
+```bash
+just coms --name dev --cname dev
+```
+
+If the chosen name is already held by a live session, the hub assigns `name2` and the client adopts it -- check the widget or `coms_net_list` for the name you actually got. Peers address each other by exact name.
+
+## Connecting to the deployed hub
+
+```bash
+./deploy/hostinger/connect.sh
+```
+
+This fetches the hub token over SSH at run time (nothing lands on disk), fetches an OpenAI key only when the shell has none and `~/.pi/auth.json` is absent, prints current peers, and launches Pi as `laptop`. Override with `COMS_CNAME`, `COMS_PURPOSE`, `PI_MODEL`, or `VPS_HOST` (`deploy/hostinger/connect.sh:12-41`).
+
+Manual equivalent for any remote hub:
+
+```bash
+export PI_COMS_NET_SERVER_URL=https://coms.siobytes.cloud
+export PI_COMS_NET_AUTH_TOKEN=<token>
+just coms --name laptop --cname laptop
+```
+
+## Speaking to the fleet
+
+From any client session, natural language drives the tools:
+
+- "ask aws-356994971776 how many RDS instances it sees" -- the model calls `coms_net_send` to that peer and `coms_net_await` for the reply.
+- Prefixing works too: `aws-356994971776: what EC2 instances are running?` reads as an instruction to route there. The prefix is interpreted by the model, not parsed by the extension, so phrasing is flexible; only the peer name must match `coms_net_list` exactly.
+- "ask everyone to summarize their environment" -- `coms_net_broadcast` fans out and returns each reply under its peer name.
+
+Replies to inbound messages are automatic: when a peer prompts your session, answer as a normal message. Never call `coms_net_send` to reply; the extension submits your turn output back to the caller.
+
+## In-session commands
+
+| Command | Effect |
+|---------|--------|
+| `/coms-net` | Refresh the peer widget |
+| `/coms-net --all` | Toggle showing `--explicit` peers |
+| `/coms-net --project <name>` | Point the widget at another project |
+| `/coms-net --reconnect` | Force SSE reconnect and re-register |
+| `/coms-net --server` | Print hub URL, version, and `server_id` |
+| `/coms --all`, `/coms --project <name>` | Local-transport equivalents (`*` scans all projects) |
+
+The widget below the editor shows each peer's name, model, live context usage bar, and purpose. A dim row is a stale peer; a crossed-out row is offline.
+
+## Identity flags
+
+Both extensions accept the same identity flags (`extensions/coms-net.ts:375-409`):
+
+| Flag | Purpose |
+|------|---------|
+| `--cname <name>` | Registered peer name |
+| `--purpose <text>` | Shown to peers in list output and the widget |
+| `--project <name>` | Namespace; default `default`. Peers only see their own project |
+| `--color <#RRGGBB>` | Widget color |
+| `--explicit` | Hidden from lists and broadcasts unless explicitly requested |
+| `--server-url`, `--auth-token` | coms-net only; override env and local discovery |
+
+Identity can also come from `--system-prompt`/`--append-system-prompt` markdown frontmatter (`name`, `description`, `color`); CLI flags win.
+
+## Models
+
+Always qualify models as `provider/id` -- `--model` matches a pattern, and a bare `gpt-5.4-mini` can fuzzy-match the wrong provider and fail with "No API key for provider". The `just` recipes `coms1` through `coms4` pin specific models for quick side-by-side peers.
+
+## Environment variables
+
+Client-side knobs (defaults in `extensions/coms-net.ts:42-52` and `extensions/coms.ts:30-35`):
+
+| Variable | Default | Controls |
+|----------|---------|----------|
+| `PI_COMS_NET_SERVER_URL` | unset | Hub URL (else local `server.json` discovery) |
+| `PI_COMS_NET_AUTH_TOKEN` | unset | Bearer token (else local `server.secret.json`) |
+| `PI_COMS_NET_PROJECT` | unset | Project fallback when `--project` is not given |
+| `PI_COMS_NET_MAX_HOPS` / `PI_COMS_MAX_HOPS` | `5` | Forwarding-chain ceiling |
+| `PI_COMS_NET_MESSAGE_TTL_MS` / `PI_COMS_TIMEOUT_MS` | `1800000` | Await default and message expiry (30 min) |
+| `PI_COMS_DIR` | `~/.pi/coms` | Local-transport registry root (coms-net's root is fixed) |
+
+Hub-side variables are covered in [Networking](../architecture/networking.md#hub-listeners-and-ports).
+
+## Watching a cloud agent
+
+```bash
+# Attach to the remote agent's terminal
+herdr --remote piagent-vps          # VPS, needs an SSH alias for the piagent user
+
+aws ssm start-session --target <instance-id> --region us-east-1   # AWS
+# then on the host:
+sudo -u piagent -i herdr
+```
+
+## See Also
+
+- [Communication](../architecture/communication.md) -- what the tools do underneath
+- [Deployment](../deployment/deployment.md) -- standing up the hub and agents
+- `README.md` -- prerequisites and quick starts
