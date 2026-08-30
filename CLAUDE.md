@@ -34,7 +34,7 @@ Star topology: the hub is a zero-permission relay; each AWS account is a spoke r
 - `deploy/modules/agent/` -- Terraform module, applied once per AWS account (see `deploy/accounts/`).
 - `deploy/hub/Dockerfile`, `deploy/hostinger/` -- the hub container and its VPS home.
 - Agents clone `repo_url` at boot (default branch, i.e. `main`): changes must be merged to `main` before a boot or bootstrap re-run picks them up.
-- `deploy/modules/agent/main.tf` grants `ce:GetCostAndUsage` (inline `cost-explorer-read`) for the monitor's daily cost check; the role otherwise stays ViewOnlyAccess + named CloudWatch reads.
+- `deploy/modules/agent/main.tf` grants `ce:GetCostAndUsage` (inline `cost-explorer-read`) for the monitor's daily cost check; the role otherwise stays ViewOnlyAccess + named CloudWatch reads. It also creates a `StatusCheckFailed` alarm on the agent host (no actions; the monitor reports its transitions).
 - On the VPS, `/srv/pi-coms` is a plain file copy, not a git checkout (`/srv` belongs to a different repo -- do not run git there); hub deploys are scp + `docker compose up -d --build`.
 
 ## Conventions

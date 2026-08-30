@@ -103,6 +103,7 @@ aws ec2 reboot-instances --instance-ids <id> --profile <name>
 | `aws_iam_role.agent` | `ViewOnlyAccess` + `AmazonSSMManagedInstanceCore` + inline policies (CloudWatch/logs reads, `ce:GetCostAndUsage` for the monitor, boot secrets) |
 | `aws_secretsmanager_secret.coms_token` | Account-local copy of the hub token |
 | `aws_secretsmanager_secret.provider_keys` | Model provider API keys, created empty |
+| `aws_cloudwatch_metric_alarm.agent_status_check` | `StatusCheckFailed >= 1` for 2 min on the agent host; no actions -- the monitor reports its transitions |
 
 Source: `deploy/modules/agent/main.tf`.
 
