@@ -67,6 +67,18 @@ variable "ssh_public_key" {
   default     = ""
 }
 
+variable "subnet_id" {
+  description = "Subnet for the agent host. Empty uses the default VPC's first default subnet, which may sit in an AZ without the instance type."
+  type        = string
+  default     = ""
+}
+
+variable "instance_type" {
+  description = "Instance type for the agent host. Must be Graviton (arm64)."
+  type        = string
+  default     = "t4g.small"
+}
+
 module "agent" {
   source = "../../modules/agent"
 
@@ -75,6 +87,8 @@ module "agent" {
   repo_url        = var.repo_url
   agent_name      = var.agent_name
   ssh_public_key  = var.ssh_public_key
+  subnet_id       = var.subnet_id
+  instance_type   = var.instance_type
 }
 
 output "agent_name" {

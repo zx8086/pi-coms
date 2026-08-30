@@ -234,6 +234,28 @@ ExecStart=/bin/bash -lc '$AGENT_HOME/bin/start-pi-agent.sh'
 WantedBy=multi-user.target
 UNIT
 
+# The account monitor: deterministic scheduled checks, reports via the hub
+# mailbox. Independent of pi-agent.service by design -- a wedged agent never
+# stops detection.
+cat > /etc/systemd/system/pi-monitor.service <<UNIT
+[Unit]
+Description=Pi AWS account monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$AGENT_USER
+WorkingDirectory=$AGENT_HOME/pi-coms
+Environment=HOME=$AGENT_HOME
+ExecStart=/bin/bash -c 'source \$HOME/.coms-env && exec \$HOME/.bun/bin/bun scripts/coms-net-monitor.ts'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 sudo -u "$AGENT_USER" -H mkdir -p "$AGENT_HOME/bin"
 cat > "$AGENT_HOME/bin/start-pi-agent.sh" <<'LAUNCH'
 #!/usr/bin/env bash
@@ -343,5 +365,7 @@ systemctl daemon-reload
 systemctl enable --now herdr.service
 systemctl enable pi-agent.service
 systemctl restart pi-agent.service
+systemctl enable pi-monitor.service
+systemctl restart pi-monitor.service
 
 echo "=== bootstrap complete $(date -Is) ==="

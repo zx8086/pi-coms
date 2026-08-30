@@ -102,6 +102,46 @@ resource "aws_iam_role_policy_attachment" "agent_viewonly" {
   policy_arn = "arn:aws:iam::aws:policy/job-function/ViewOnlyAccess"
 }
 
+// ViewOnlyAccess covers cloudwatch:Get*/List* and logs:Describe* but not
+// cloudwatch:Describe* or log-content reads, so the agent cannot answer
+// "which alarms are firing" or read log events. These are the named widenings
+// the comment above calls for: still read-only, but data-plane reads on logs.
+resource "aws_iam_role_policy" "agent_cloudwatch_read" {
+  name = "cloudwatch-logs-read"
+  role = aws_iam_role.agent.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarmHistory",
+        "logs:FilterLogEvents",
+        "logs:GetLogEvents",
+        "logs:StartQuery",
+        "logs:GetQueryResults",
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
+// The monitor's daily cost check. Cost Explorer has no resource-level scoping.
+resource "aws_iam_role_policy" "agent_cost_read" {
+  name = "cost-explorer-read"
+  role = aws_iam_role.agent.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ce:GetCostAndUsage"]
+      Resource = "*"
+    }]
+  })
+}
+
 // SSM Session Manager: shell access with no inbound port and no SSH key.
 resource "aws_iam_role_policy_attachment" "agent_ssm" {
   role       = aws_iam_role.agent.name

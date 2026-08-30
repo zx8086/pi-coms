@@ -1,0 +1,81 @@
+# Communication
+
+The message model shared by both transports: how a prompt travels, how replies come back automatically, and the rails that keep agent-to-agent conversation from looping. Tool names below use the `coms_net_*` form; the `coms_*` equivalents behave the same unless a difference is called out.
+
+## Tool surface
+
+| Tool | Parameters | Behavior |
+|------|-----------|----------|
+| `coms_net_list` | `project?`, `include_explicit?` | List peers with name, purpose, model, live context usage, status |
+| `coms_net_send` | `target`, `prompt`, `conversation_id?`, `response_schema?` | Send a prompt to one peer; returns `msg_id` on ack |
+| `coms_net_get` | `msg_id` | Non-blocking status poll: `pending`, `complete`, `error`, `timeout` |
+| `coms_net_await` | `msg_id`, `timeout_ms?` | Block until the reply lands or the timeout fires |
+| `coms_net_broadcast` | `prompt`, `targets?`, `timeout_ms?` | Fan out to all (or selected) peers; replies gathered in parallel |
+
+`coms_net_broadcast` exists only on the networked transport. `target` is a peer name in the caller's project, or a session id. When a name maps to more than one live session, the hub rejects the send with `ambiguous_target` rather than guessing.
+
+## Message lifecycle
+
+States: `queued`, `delivered`, `complete`, `error`, `timeout` (`scripts/coms-net-server.ts:133-138`). There is deliberately no `in_progress` state.
+
+```
++--------+  target SSE open  +-----------+  reply submitted  +----------+
+| queued | ----------------> | delivered | ----------------> | complete |
++--------+                   +-----------+                   +----------+
+    |                              |                              or
+    |         TTL (30 min) expires |                         +----------+
+    +------------------------------+-----------------------> |  error   |
+                                                             +----------+
+```
+
+1. **Send.** `coms_net_send` posts to `/v1/messages`. The hub resolves the target, checks the hop count and the target's inbox depth (cap 100), assigns a ULID `msg_id`, and pushes a `prompt` event down the target's SSE stream. The sender gets the `msg_id` back immediately.
+2. **Deliver.** The receiving extension injects the prompt into its session as a follow-up message that triggers a normal Pi turn (`extensions/coms-net.ts:657-714`). The injected text names the sender and its working directory.
+3. **Reply.** On `agent_end`, the extension takes the final assistant message of that turn and submits it via `POST /v1/messages/:id/response` (`extensions/coms-net.ts:1650-1707`). The hub pushes a `response` event to the sender and releases any awaiters.
+4. **Collect.** The sender's `coms_net_await` races three sources: the local SSE-resolved promise, a server long-poll on `/v1/messages/:id/await`, and a local timer (`extensions/coms-net.ts:1437`).
+
+Messages expire 30 minutes after creation (`PI_COMS_NET_MESSAGE_TTL_MS`); expired queued or delivered messages become `error: "expired"`.
+
+### Replies are automatic -- never a tool call
+
+The receiver must not call `coms_net_send` to answer an inbound prompt; its turn output is the answer. This rule is enforced three ways:
+
+1. The injected inbound message carries an explicit guard: "reply by writing a normal assistant message ... DO NOT call coms_net_send/coms_net_await/coms_net_get to reply; that creates a ping-pong loop" (`extensions/coms-net.ts:685-688`).
+2. Every send-family tool description repeats the warning.
+3. The hop limit (below) backstops both.
+
+The local `coms` transport relies on the hop counter alone; its inbound injection carries no guard text.
+
+### Structured replies
+
+`response_schema` requests a JSON reply. The receiving extension parses the final assistant message as JSON and returns a parse failure as `error: "response not valid JSON"`; it checks parseability only, not conformance to the schema.
+
+## Broadcast
+
+`coms_net_broadcast` (`extensions/coms-net.ts:1505-1646`):
+
+1. Resolves targets: the explicit `targets` list, or every peer in the project that is not `offline` (stale peers are included).
+2. Fans out one independent `/v1/messages` send per target in parallel. A per-target send failure becomes that target's result; it never fails the whole broadcast.
+3. Gathers all replies in parallel with a **per-peer** timeout, so wall-clock time is bounded by the slowest peer, not the sum.
+4. Returns `<replied>/<total>` with each reply (or error) under its peer name.
+
+## Safety rails
+
+| Rail | Mechanism | Default |
+|------|-----------|---------|
+| Hop limit | `hops` increments when a send happens inside an inbound-triggered turn; sends at the ceiling are rejected by client and hub | 5 (`PI_COMS_NET_MAX_HOPS` / `PI_COMS_MAX_HOPS`) |
+| Ping-pong guard | Injected guard text plus tool-description warnings (coms-net) | -- |
+| Inbox cap | Hub rejects sends when the target has 100 undelivered or unanswered messages | `PI_COMS_NET_MAX_INBOX` |
+| Message TTL | Undelivered or unanswered messages expire | 30 min (`PI_COMS_NET_MESSAGE_TTL_MS`) |
+| Audit log | Every send/receive/response logged with `msg_id`, names, hops -- never prompt or response bodies | -- |
+
+A fresh user-initiated send starts at `hops = 0`. A send made while answering an inbound message inherits `inbound.hops + 1` (`extensions/coms-net.ts:1208-1211`), so a forwarding chain dies after five hosts no matter what the models decide to do.
+
+## Audit logs
+
+Both extensions append structured entries to the Pi session log: `coms-log` and `coms-net-log`. Logged: boot and shutdown, registration and name collisions, `prompt_in`/`prompt_out`, `response_in`/`response_out`, SSE connect/disconnect/reconnect, failures. Never logged: prompt text, response bodies, auth tokens. The hub additionally logs to stdout with prompt previews truncated to 47 characters.
+
+## See Also
+
+- [Networking](networking.md) -- the endpoints and SSE events beneath these semantics
+- [System Overview](overview.md)
+- [Usage](../development/usage.md) -- addressing the fleet in practice
