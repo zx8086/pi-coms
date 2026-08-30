@@ -19,6 +19,7 @@
 // - Status state machine: queued | delivered | complete | error | timeout.
 //   No `in_progress` (dropped from v1).
 
+import { Database } from "bun:sqlite";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -37,6 +38,7 @@ const REG_ROOT = path.join(os.homedir(), ".pi", "coms-net");
 
 const MAX_HOPS = Number(process.env.PI_COMS_NET_MAX_HOPS ?? 5);
 const MESSAGE_TTL_MS = Number(process.env.PI_COMS_NET_MESSAGE_TTL_MS ?? 1_800_000);
+const MAX_TTL_MS = Number(process.env.PI_COMS_NET_MAX_TTL_MS ?? 604_800_000);
 const MAX_INBOX = Number(process.env.PI_COMS_NET_MAX_INBOX ?? 100);
 const HEARTBEAT_MS = Number(process.env.PI_COMS_NET_HEARTBEAT_MS ?? 10_000);
 const STALE_AFTER_MS = Number(process.env.PI_COMS_NET_STALE_AFTER_MS ?? 30_000);
@@ -162,7 +164,10 @@ export type ComsMessage = {
 	msg_id: string;
 	project: string;
 	sender_session: string;
-	target_session: string;
+	sender_name: string;
+	sender_cwd: string;
+	target_session: string | null; // null = queued by name, unclaimed
+	target_name: string | null;
 	prompt: string;
 	conversation_id: string | null;
 	response_schema: object | null;
@@ -212,13 +217,14 @@ export type SendRequest = {
 	conversation_id: string | null;
 	response_schema: object | null;
 	hops: number;
+	ttl_ms?: number | null;
 };
 
 export type SendResponse = {
 	ok: true;
 	msg_id: string;
 	status: MessageStatus;
-	target_session: string;
+	target_session: string | null;
 };
 
 export type ResponseSubmitRequest = {
@@ -372,6 +378,90 @@ export function resolveUniqueName(
 	let n = 2;
 	while (liveNames.has(`${desiredName}${n}`)) n++;
 	return `${desiredName}${n}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mailbox (bun:sqlite write-through; the in-memory map stays the hot path)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class MailStore {
+	private db: Database;
+	constructor(dbPath: string) {
+		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+		this.db = new Database(dbPath, { create: true });
+		this.db.exec("PRAGMA journal_mode = WAL;");
+		this.db.exec(`CREATE TABLE IF NOT EXISTS messages (
+			msg_id TEXT PRIMARY KEY,
+			project TEXT NOT NULL,
+			sender_session TEXT NOT NULL,
+			sender_name TEXT NOT NULL DEFAULT '',
+			sender_cwd TEXT NOT NULL DEFAULT '',
+			target_session TEXT,
+			target_name TEXT,
+			prompt TEXT NOT NULL,
+			conversation_id TEXT,
+			response_schema TEXT,
+			hops INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL,
+			response TEXT,
+			error TEXT,
+			created_at TEXT NOT NULL,
+			delivered_at TEXT,
+			completed_at TEXT,
+			expires_at TEXT NOT NULL
+		)`);
+	}
+	upsert(m: ComsMessage): void {
+		this.db.query(`INSERT INTO messages (msg_id, project, sender_session, sender_name, sender_cwd,
+			target_session, target_name, prompt, conversation_id, response_schema, hops, status,
+			response, error, created_at, delivered_at, completed_at, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(msg_id) DO UPDATE SET target_session=excluded.target_session,
+			target_name=excluded.target_name, status=excluded.status, response=excluded.response,
+			error=excluded.error, delivered_at=excluded.delivered_at,
+			completed_at=excluded.completed_at, expires_at=excluded.expires_at`).run(
+			m.msg_id, m.project, m.sender_session, m.sender_name, m.sender_cwd,
+			m.target_session, m.target_name, m.prompt, m.conversation_id,
+			m.response_schema ? JSON.stringify(m.response_schema) : null, m.hops, m.status,
+			m.response == null ? null : JSON.stringify(m.response), m.error ?? null,
+			m.created_at, m.delivered_at ?? null, m.completed_at ?? null, m.expires_at,
+		);
+	}
+	remove(msg_id: string): void {
+		this.db.query("DELETE FROM messages WHERE msg_id = ?").run(msg_id);
+	}
+	loadNonTerminal(): ComsMessage[] {
+		const rows = this.db.query(
+			"SELECT * FROM messages WHERE status IN ('queued','delivered') ORDER BY created_at ASC",
+		).all() as any[];
+		return rows.map((r) => ({
+			msg_id: r.msg_id,
+			project: r.project,
+			sender_session: r.sender_session,
+			sender_name: r.sender_name,
+			sender_cwd: r.sender_cwd,
+			target_session: r.target_session,
+			target_name: r.target_name,
+			prompt: r.prompt,
+			conversation_id: r.conversation_id,
+			response_schema: r.response_schema ? JSON.parse(r.response_schema) : null,
+			hops: r.hops,
+			status: r.status as MessageStatus,
+			response: r.response == null ? null : JSON.parse(r.response),
+			error: r.error,
+			created_at: r.created_at,
+			...(r.delivered_at ? { delivered_at: r.delivered_at } : {}),
+			...(r.completed_at ? { completed_at: r.completed_at } : {}),
+			expires_at: r.expires_at,
+		}));
+	}
+	close(): void {
+		try {
+			this.db.close();
+		} catch {
+			// noop
+		}
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -895,7 +985,10 @@ async function handleSendMessage(req: Request): Promise<Response> {
 		msg_id: ulid(),
 		project: projectName,
 		sender_session: body.sender_session,
+		sender_name: sender.name,
+		sender_cwd: sender.cwd,
 		target_session: target.session_id,
+		target_name: target.name,
 		prompt: body.prompt,
 		conversation_id:
 			body.conversation_id && typeof body.conversation_id === "string"
