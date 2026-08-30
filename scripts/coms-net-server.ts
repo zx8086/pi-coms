@@ -474,6 +474,17 @@ const state: ServerState = {
 	projects: new Map<string, ProjectState>(),
 };
 
+const mailStores = new Map<string, MailStore>();
+
+function mailFor(project: string): MailStore {
+	let s = mailStores.get(project);
+	if (!s) {
+		s = new MailStore(path.join(projectDir(project), "messages.db"));
+		mailStores.set(project, s);
+	}
+	return s;
+}
+
 function getOrCreateProject(name: string): ProjectState {
 	let p = state.projects.get(name);
 	if (!p) {
@@ -572,6 +583,67 @@ function sendToStream(
 		w.enqueue(sseFrame(event, data, id));
 	} catch {
 		// dead; abort handler will reap
+	}
+}
+
+function flushQueuedMail(p: ProjectState, projectName: string, sessionId: string): void {
+	const entry = p.agents.get(sessionId);
+	if (!entry) return;
+	const mail = mailFor(projectName);
+	// Claim name-addressed mail for this session.
+	for (const m of p.messages.values()) {
+		if (m.status === "queued" && m.target_session === null && m.target_name === entry.name) {
+			m.target_session = sessionId;
+			mail.upsert(m);
+		}
+	}
+	const pendingList = [...p.messages.values()]
+		.filter((m) => m.status === "queued" && m.target_session === sessionId)
+		.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+	for (const m of pendingList) {
+		sendToStream(p, sessionId, "prompt", {
+			msg_id: m.msg_id,
+			project: projectName,
+			sender: { session_id: m.sender_session, name: m.sender_name, cwd: m.sender_cwd },
+			prompt: m.prompt,
+			conversation_id: m.conversation_id,
+			response_schema: m.response_schema,
+			hops: m.hops,
+		});
+		m.status = "delivered";
+		m.delivered_at = nowIso();
+		mail.upsert(m);
+		sendToStream(p, m.sender_session, "message_status", {
+			msg_id: m.msg_id,
+			status: "delivered",
+		});
+		logMessageSend(m.sender_name, entry.name, m.msg_id, m.prompt, m.hops, true);
+	}
+}
+
+function recoverMail(): void {
+	const projectsRoot = path.join(REG_ROOT, "projects");
+	let entries: string[] = [];
+	try {
+		entries = fs.readdirSync(projectsRoot);
+	} catch {
+		return; // no prior state
+	}
+	for (const name of entries) {
+		const dbPath = path.join(projectsRoot, name, "messages.db");
+		if (!fs.existsSync(dbPath)) continue;
+		const p = getOrCreateProject(name);
+		for (const m of mailFor(name).loadNonTerminal()) {
+			// Sessions do not survive a restart; delivered-but-unanswered mail is
+			// re-queued (at-least-once) so the next session under the name gets it.
+			if (m.status === "delivered" || m.target_session !== null) {
+				m.status = "queued";
+				m.target_session = null;
+				delete m.delivered_at;
+				mailFor(name).upsert(m);
+			}
+			p.messages.set(m.msg_id, m);
+		}
 	}
 }
 
@@ -778,6 +850,9 @@ function handleEvents(req: Request, url: URL): Response {
 				closed = true;
 			}
 
+			// Mailbox: flush queued messages for this session, oldest first.
+			flushQueuedMail(p, projectName, session_id);
+
 			// abort handler
 			const onAbort = () => {
 				if (closed) return;
@@ -938,6 +1013,13 @@ async function handleSendMessage(req: Request): Promise<Response> {
 		return errorJson("hop_limit_exceeded", 409, { hops, max_hops: MAX_HOPS });
 	}
 
+	// Mailbox TTL: beyond the default the send survives an offline recipient.
+	const requestedTtl =
+		typeof body.ttl_ms === "number" && body.ttl_ms > 0
+			? Math.min(body.ttl_ms, MAX_TTL_MS)
+			: MESSAGE_TTL_MS;
+	const isMailbox = requestedTtl > MESSAGE_TTL_MS;
+
 	// Resolve target.
 	let target: RegistryEntry | undefined;
 	if (body.target_session && typeof body.target_session === "string") {
@@ -956,6 +1038,48 @@ async function handleSendMessage(req: Request): Promise<Response> {
 		} else {
 			const bag = p.nameIndex.get(desired);
 			if (!bag || bag.size === 0) {
+				if (isMailbox) {
+					// Store-and-forward: queue by name for the next session
+					// registering under it. target stays unresolved.
+					const msg: ComsMessage = {
+						msg_id: ulid(),
+						project: projectName,
+						sender_session: body.sender_session,
+						sender_name: sender.name,
+						sender_cwd: sender.cwd,
+						target_session: null,
+						target_name: desired,
+						prompt: body.prompt,
+						conversation_id:
+							body.conversation_id && typeof body.conversation_id === "string"
+								? body.conversation_id
+								: null,
+						response_schema:
+							body.response_schema && typeof body.response_schema === "object"
+								? body.response_schema
+								: null,
+						hops,
+						status: "queued",
+						response: null,
+						error: null,
+						created_at: nowIso(),
+						expires_at: new Date(Date.now() + requestedTtl).toISOString(),
+					};
+					p.messages.set(msg.msg_id, msg);
+					mailFor(projectName).upsert(msg);
+					sendToStream(p, body.sender_session, "message_status", {
+						msg_id: msg.msg_id,
+						status: "queued",
+					});
+					logMessageSend(sender.name, `${desired}(offline)`, msg.msg_id, msg.prompt, hops, false);
+					const resp: SendResponse = {
+						ok: true,
+						msg_id: msg.msg_id,
+						status: "queued",
+						target_session: null,
+					};
+					return json(resp);
+				}
 				logRejected("target_not_found", `${sender.name} → "${desired}"`);
 				return errorJson("target_not_found", 404, { target: desired });
 			}
@@ -980,7 +1104,7 @@ async function handleSendMessage(req: Request): Promise<Response> {
 	}
 
 	const created = nowIso();
-	const expires = new Date(Date.now() + MESSAGE_TTL_MS).toISOString();
+	const expires = new Date(Date.now() + requestedTtl).toISOString();
 	const msg: ComsMessage = {
 		msg_id: ulid(),
 		project: projectName,
@@ -1006,6 +1130,7 @@ async function handleSendMessage(req: Request): Promise<Response> {
 		expires_at: expires,
 	};
 	p.messages.set(msg.msg_id, msg);
+	mailFor(projectName).upsert(msg);
 
 	// Notify sender: queued
 	sendToStream(p, body.sender_session, "message_status", {
@@ -1031,6 +1156,7 @@ async function handleSendMessage(req: Request): Promise<Response> {
 		});
 		msg.status = "delivered";
 		msg.delivered_at = nowIso();
+		mailFor(projectName).upsert(msg);
 		// Notify sender: delivered
 		sendToStream(p, body.sender_session, "message_status", {
 			msg_id: msg.msg_id,
@@ -1240,6 +1366,7 @@ async function handleSubmitResponse(
 	msg.response = body.response ?? null;
 	msg.error = isError ? String(body.error) : null;
 	msg.completed_at = nowIso();
+	mailFor(msg.project).upsert(msg);
 
 	// Look up responder name for the SSE response payload.
 	const responder = project.agents.get(body.responder_session);
@@ -1459,7 +1586,7 @@ function staleScanTick(): void {
 
 function ttlScanTick(): void {
 	const now = Date.now();
-	for (const p of state.projects.values()) {
+	for (const [projectName, p] of state.projects) {
 		for (const [id, m] of [...p.messages]) {
 			const expires = Date.parse(m.expires_at);
 			const completedAt = m.completed_at ? Date.parse(m.completed_at) : 0;
@@ -1474,6 +1601,7 @@ function ttlScanTick(): void {
 					releaseAwaiters(p, id);
 					logExpired(id);
 					p.messages.delete(id);
+					mailFor(projectName).remove(id);
 				}
 			} else if (m.status === "complete" || m.status === "error") {
 				if (
@@ -1481,10 +1609,12 @@ function ttlScanTick(): void {
 					now - completedAt > MESSAGE_TTL_MS
 				) {
 					p.messages.delete(id);
+					mailFor(projectName).remove(id);
 				}
 			} else if (m.status === "timeout") {
 				if (Number.isFinite(expires) && now > expires) {
 					p.messages.delete(id);
+					mailFor(projectName).remove(id);
 				}
 			}
 		}
@@ -1548,6 +1678,10 @@ export function main(): void {
 
 	const dir = projectDir(PROJECT);
 	ensureDirSync(dir);
+
+	// Mailbox recovery: reload non-terminal messages from every project's
+	// messages.db. New server_id, same mail.
+	recoverMail();
 
 	// Boot Bun.serve.
 	const server = (globalThis as any).Bun.serve({
