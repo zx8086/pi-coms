@@ -216,3 +216,22 @@ resource "aws_instance" "agent" {
 
   depends_on = [aws_secretsmanager_secret_version.coms_token]
 }
+
+// Status-check alarm on the agent host itself: gives the monitor's alarm
+// family a real signal for the one instance that must stay healthy. No alarm
+// actions -- the monitor's DescribeAlarms sweep picks up the transition and
+// reports it. Missing data (host stopped) stays quiet; the drift check
+// already covers stops.
+resource "aws_cloudwatch_metric_alarm" "agent_status_check" {
+  alarm_name          = "${var.name_prefix}-agent-status-check"
+  alarm_description   = "EC2 status checks failing on the Pi agent host"
+  namespace           = "AWS/EC2"
+  metric_name         = "StatusCheckFailed"
+  dimensions          = { InstanceId = aws_instance.agent.id }
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+}
