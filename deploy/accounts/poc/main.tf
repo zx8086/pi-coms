@@ -73,6 +73,12 @@ variable "subnet_id" {
   default     = ""
 }
 
+variable "instance_type" {
+  description = "Instance type for the agent host. Must be Graviton (arm64)."
+  type        = string
+  default     = "t4g.small"
+}
+
 module "agent" {
   source = "../../modules/agent"
 
@@ -82,6 +88,7 @@ module "agent" {
   agent_name      = var.agent_name
   ssh_public_key  = var.ssh_public_key
   subnet_id       = var.subnet_id
+  instance_type   = var.instance_type
 }
 
 output "agent_name" {
