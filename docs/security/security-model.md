@@ -50,10 +50,19 @@ The role attached to each account's agent (`deploy/modules/agent/main.tf:83-127`
 | `AmazonSSMManagedInstanceCore` (managed) | Session Manager |
 | `read-agent-secrets` (inline) | `secretsmanager:GetSecretValue` on exactly its two boot secrets |
 | `cloudwatch-logs-read` (inline) | `cloudwatch:DescribeAlarms`, `DescribeAlarmHistory`, `logs:FilterLogEvents`, `GetLogEvents`, `StartQuery`, `GetQueryResults` |
+| `cost-explorer-read` (inline) | `ce:GetCostAndUsage`, for the monitor's daily cost check. Cost Explorer has no resource-level scoping |
 
 `ViewOnlyAccess` was chosen over `ReadOnlyAccess` deliberately: the agent describes the environment; it does not read data. Widen deliberately, one named action at a time -- the CloudWatch inline policy is the model for how.
 
 Note the boundary the CloudWatch widening crossed: `logs:GetLogEvents` is a data-plane read, so application log content is now visible to the agent and to anyone who can prompt it. Keep that in mind before granting further data reads.
+
+The monitor process (`pi-monitor.service`) runs under the same instance role and the same constraint: it detects and reports, never remediates. The role stays read-only.
+
+## Hub data at rest
+
+The mailbox changed the hub's storage posture. Message rows -- **including prompt and response bodies** -- persist in `~/.pi/coms-net/projects/<project>/messages.db` (a Docker named volume on the VPS) from creation until delivery plus sweep. For default sends that window is minutes; for mailbox sends it is up to `PI_COMS_NET_MAX_TTL_MS` (default 7 days). Terminal rows are deleted by the sweep, not retained.
+
+Consequences: compromising the hub host now yields recent and queued message content, not just live relay traffic. Treat the `coms-hub-mail` volume like the token file -- root-owned host storage on a box you already trust with TLS termination. Registry, streams, and awaiters remain memory-only.
 
 ## Secrets handling
 
@@ -80,7 +89,7 @@ Agents accept natural-language prompts from any peer holding the token, and inbo
 
 1. The blast radius of a hostile prompt equals the agent's IAM role -- metadata reads plus the named CloudWatch actions.
 2. The hop limit (5) stops a compromised or confused peer from fanning work across the fleet indefinitely.
-3. The inbox cap (100) and message TTL (30 minutes) bound queue-stuffing.
+3. The inbox cap (100) and message TTL bound queue-stuffing. Mailbox sends stretch the TTL to 7 days, and a send to an offline name is not counted by the inbox cap (the cap counts messages per live session, and there is none yet) -- for offline names the bound is the TTL sweep plus the single-token perimeter. Durability extends the window, not the audience: any token holder could already send at will.
 4. The audit trail records who messaged whom, without retaining payloads that might themselves be sensitive.
 
 There is no per-peer authorization: any token holder can prompt any agent. If peers ever need different privileges, that separation must come from separate hubs or projects with separate tokens.

@@ -7,7 +7,7 @@ The message model shared by both transports: how a prompt travels, how replies c
 | Tool | Parameters | Behavior |
 |------|-----------|----------|
 | `coms_net_list` | `project?`, `include_explicit?` | List peers with name, purpose, model, live context usage, status |
-| `coms_net_send` | `target`, `prompt`, `conversation_id?`, `response_schema?` | Send a prompt to one peer; returns `msg_id` on ack |
+| `coms_net_send` | `target`, `prompt`, `conversation_id?`, `response_schema?`, `ttl_ms?` | Send a prompt to one peer; returns `msg_id` on ack. A `ttl_ms` beyond the 30-minute default makes the send durable (see Mailbox below) |
 | `coms_net_get` | `msg_id` | Non-blocking status poll: `pending`, `complete`, `error`, `timeout` |
 | `coms_net_await` | `msg_id`, `timeout_ms?` | Block until the reply lands or the timeout fires |
 | `coms_net_broadcast` | `prompt`, `targets?`, `timeout_ms?` | Fan out to all (or selected) peers; replies gathered in parallel |
@@ -33,7 +33,13 @@ States: `queued`, `delivered`, `complete`, `error`, `timeout` (`scripts/coms-net
 3. **Reply.** On `agent_end`, the extension takes the final assistant message of that turn and submits it via `POST /v1/messages/:id/response` (`extensions/coms-net.ts:1650-1707`). The hub pushes a `response` event to the sender and releases any awaiters.
 4. **Collect.** The sender's `coms_net_await` races three sources: the local SSE-resolved promise, a server long-poll on `/v1/messages/:id/await`, and a local timer (`extensions/coms-net.ts:1437`).
 
-Messages expire 30 minutes after creation (`PI_COMS_NET_MESSAGE_TTL_MS`); expired queued or delivered messages become `error: "expired"`.
+Messages expire 30 minutes after creation by default (`PI_COMS_NET_MESSAGE_TTL_MS`); expired queued or delivered messages become `error: "expired"`. A send may request a longer `ttl_ms`, capped by `PI_COMS_NET_MAX_TTL_MS` (default 7 days).
+
+### Mailbox: durable sends to offline peers
+
+A send whose `ttl_ms` exceeds the default is a **mailbox send**. If the target name has no live session, the hub does not return `target_not_found`; it queues the message by name (`200 {status: "queued", target_session: null}`) and persists it in sqlite. The next session registering under that name receives all its queued mail oldest-first as ordinary `prompt` events, right after `hello` and `pool_snapshot` on its SSE stream. Queued mail survives hub restarts and container recreation. Short-TTL interactive sends keep the fail-fast behavior exactly as before.
+
+This is how monitor reports reach an operator whose laptop was offline at check time. Full mechanics in [Monitoring](monitoring.md#the-hub-mailbox).
 
 ### Replies are automatic -- never a tool call
 
@@ -65,7 +71,7 @@ The local `coms` transport relies on the hop counter alone; its inbound injectio
 | Hop limit | `hops` increments when a send happens inside an inbound-triggered turn; sends at the ceiling are rejected by client and hub | 5 (`PI_COMS_NET_MAX_HOPS` / `PI_COMS_MAX_HOPS`) |
 | Ping-pong guard | Injected guard text plus tool-description warnings (coms-net) | -- |
 | Inbox cap | Hub rejects sends when the target has 100 undelivered or unanswered messages | `PI_COMS_NET_MAX_INBOX` |
-| Message TTL | Undelivered or unanswered messages expire | 30 min (`PI_COMS_NET_MESSAGE_TTL_MS`) |
+| Message TTL | Undelivered or unanswered messages expire | 30 min (`PI_COMS_NET_MESSAGE_TTL_MS`); per-send `ttl_ms` capped at 7 d (`PI_COMS_NET_MAX_TTL_MS`) |
 | Audit log | Every send/receive/response logged with `msg_id`, names, hops -- never prompt or response bodies | -- |
 
 A fresh user-initiated send starts at `hops = 0`. A send made while answering an inbound message inherits `inbound.hops + 1` (`extensions/coms-net.ts:1208-1211`), so a forwarding chain dies after five hosts no matter what the models decide to do.
@@ -77,5 +83,6 @@ Both extensions append structured entries to the Pi session log: `coms-log` and 
 ## See Also
 
 - [Networking](networking.md) -- the endpoints and SSE events beneath these semantics
+- [Monitoring](monitoring.md) -- the mailbox in detail, and the monitor that relies on it
 - [System Overview](overview.md)
 - [Usage](../development/usage.md) -- addressing the fleet in practice

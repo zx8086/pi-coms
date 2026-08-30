@@ -9,13 +9,13 @@ aws-222222222222 ───┤
 devops (VPS) ───────┘
 ```
 
-Each AWS account runs its own agent with a read-only IAM role; from one session you address any of them by name, or all of them at once.
+Each AWS account runs its own agent with a read-only IAM role; from one session you address any of them by name, or all of them at once. Each account host also runs a deterministic monitor (`monitor-aws-<account_id>`) that checks alarms, logs, drift, and cost on a schedule and mails findings through the hub's store-and-forward mailbox -- reports wait for you even when your session is offline.
 
 ## Prerequisites
 
 | Tool            | Purpose                   | Install                                                    |
 | --------------- | ------------------------- | ---------------------------------------------------------- |
-| **Bun** >= 1.3  | Runtime & package manager | [bun.sh](https://bun.sh)                                   |
+| **Bun** >= 1.4  | Runtime & package manager (`Bun.cron` for the monitor) | [bun.sh](https://bun.sh)                    |
 | **just**        | Task runner               | `brew install just`                                        |
 | **pi**          | Pi Coding Agent CLI       | [Pi docs](https://github.com/mariozechner/pi-coding-agent) |
 
@@ -43,7 +43,7 @@ Pi does not auto-load `.env`. The `just` recipes load it via `set dotenv-load`; 
 | Tool | What it does |
 | --- | --- |
 | `*_list` | List peer agents with names, models, live context usage |
-| `*_send` | Send a prompt to one peer; returns a `msg_id` on ack |
+| `*_send` | Send a prompt to one peer; returns a `msg_id` on ack. Optional `ttl_ms` queues durably for an offline name (hub mailbox, up to 7 days) |
 | `*_get` | Non-blocking poll on `msg_id` |
 | `*_await` | Block until the reply lands or a timeout fires |
 | `coms_net_broadcast` | One prompt to all (or selected) peers; replies gathered in parallel |
@@ -84,9 +84,21 @@ From any client session:
 - "ask aws-111111111111 how many RDS instances it sees" -- routed via `coms_net_send` / `coms_net_await` to that one agent.
 - "ask everyone to summarize their environment" -- `coms_net_broadcast` fans out to every online peer and returns each reply under its name.
 
+## Account monitoring
+
+Each deployed AWS host runs `pi-monitor.service` (`scripts/coms-net-monitor.ts`): deterministic checks every 15 minutes (alarm transitions, log error scan, instance drift) and daily (cost vs a 14-day baseline), with zero token spend when quiet. Findings are investigated by the account's Pi agent and reported to `laptop` via the mailbox; a daily digest doubles as the dead-man signal. Prompt it directly: `ask monitor-aws-<account_id> for status`. Details in [`docs/architecture/monitoring.md`](docs/architecture/monitoring.md).
+
+## Tests
+
+```bash
+bun test
+```
+
+Unit tests cover the monitor checks, state, and report pipeline; integration tests spawn the real hub in a temp `HOME` to exercise the mailbox (queueing, flush-on-connect, restart recovery).
+
 ## Deployment
 
-See [`deploy/README.md`](deploy/README.md): the hub as a Docker container behind any TLS proxy, a VPS bootstrap, and a Terraform module that puts one read-only Pi agent into each AWS account.
+See [`deploy/README.md`](deploy/README.md): the hub as a Docker container behind any TLS proxy, a VPS bootstrap, and a Terraform module that puts one read-only Pi agent (plus its monitor) into each AWS account.
 
 ## Safety rails
 

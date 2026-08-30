@@ -121,7 +121,16 @@ journalctl -u pi-agent -f
 ```
 
 Restarting the hub clears the registry, since it is in-memory. Agents
-re-register on their next heartbeat (10s).
+re-register on their next heartbeat (10s). Mailbox messages survive: the
+sqlite store lives on the `coms-hub-mail` named volume
+(`/home/bun/.pi/coms-net` in the container), reloaded on boot, so
+store-and-forward mail outlives restarts and container recreation. See
+`docs/architecture/monitoring.md`.
+
+`/srv/pi-coms` holds plain copies of `deploy/` and `scripts/` from this repo
+(it is not a git checkout -- `/srv` itself is a different repo's worktree, so
+never run git commands in here). To update the hub: copy the changed files in,
+then `docker compose up -d --build`.
 
 ## Gotchas
 
@@ -176,3 +185,9 @@ credentials.
 
 **Traefik cannot resolve container names** -- it runs `network_mode: host`. Give
 it a `127.0.0.1:<port>` address, as the hub does, rather than a container IP.
+
+**The shared bootstrap installs `pi-monitor.service` on this host too.** The
+monitor is built for AWS accounts; on the VPS there are no AWS credentials, so
+it registers as `monitor-aws-unknown`, journals a check error per family each
+cycle, and still mails a daily digest. Harmless but noisy -- disable it here
+with `systemctl disable --now pi-monitor` after a bootstrap re-run.
