@@ -79,6 +79,8 @@ All checks are deterministic AWS SDK calls under the instance role, with clients
 
 Watermarks, fingerprints, and snapshots all persist in `state.db`, so a monitor restart produces neither duplicate nor missed alerts.
 
+The agent module provisions one alarm itself -- `<name_prefix>-agent-status-check` (`StatusCheckFailed` on the agent host, no actions) -- so the alarm family always has a real signal even in an account with no other alarms: a degraded agent host becomes a critical incident report instead of silence.
+
 ### Investigation
 
 Findings of severity warn or critical go to the account's Pi agent (`aws-<account_id>`) as **one batched coms prompt per run**, carrying a `response_schema` for structured diagnoses (probable cause, affected resources, suggested action) and prior-incident context from the journal. Timeout 5 minutes, one attempt; on timeout or an unparseable reply the report ships with an "uninvestigated" marker. Detection never depends on the model.
