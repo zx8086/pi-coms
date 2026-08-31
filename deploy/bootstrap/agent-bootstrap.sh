@@ -27,6 +27,8 @@
 #     AGENT_PURPOSE   (default derived from AGENT_NAME)
 #     PI_MODEL        (default openai/gpt-5.4-mini; provider-qualified -- a bare
 #                      model id can fuzzy-match the wrong provider)
+#     PI_PROVIDER     explicit pi --provider; amazon-bedrock runs models under
+#                     the instance role with no API keys. Empty = derive from model
 #     COMS_PROJECT    (default "default")
 #     REPO_URL        clone URL of this repo (required)
 #     AWS_ACCOUNT_ID  exported to the agent env when set
@@ -42,6 +44,7 @@ AGENT_HOME="/home/$AGENT_USER"
 REPO_URL="${REPO_URL:?set REPO_URL to the clone URL of this repo}"
 AGENT_NAME="${AGENT_NAME:?AGENT_NAME is required}"
 PI_MODEL="${PI_MODEL:-openai/gpt-5.4-mini}"
+PI_PROVIDER="${PI_PROVIDER:-}"
 COMS_PROJECT="${COMS_PROJECT:-default}"
 AGENT_PURPOSE="${AGENT_PURPOSE:-Pi coms-net agent $AGENT_NAME}"
 SERVER_URL="${PI_COMS_NET_SERVER_URL:?PI_COMS_NET_SERVER_URL is required}"
@@ -351,10 +354,18 @@ echo "root pane: $PANE_ID"
 # failure -- even though Pi started and registered within seconds. Keep the
 # timeout short and treat the failure as non-fatal; the hub registry below is
 # the real readiness signal.
+# Optional explicit provider (e.g. amazon-bedrock, which authenticates via
+# the instance role -- no API keys).
+PROVIDER_ARGS=()
+if [ -n "PI_PROVIDER_PLACEHOLDER" ]; then
+  PROVIDER_ARGS=(--provider "PI_PROVIDER_PLACEHOLDER")
+fi
+
 herdr agent start "AGENT_NAME_PLACEHOLDER" --kind pi --pane "$PANE_ID" --timeout 15000 -- \
   -e extensions/coms-net.ts \
   -e extensions/minimal.ts \
   --model "PI_MODEL_PLACEHOLDER" \
+  "${PROVIDER_ARGS[@]}" \
   --cname "AGENT_NAME_PLACEHOLDER" \
   --project "COMS_PROJECT_PLACEHOLDER" \
   --purpose "AGENT_PURPOSE_PLACEHOLDER" || echo "herdr agent start reported failure; verifying against the hub"
@@ -376,6 +387,7 @@ LAUNCH
 sed -i \
   -e "s|AGENT_NAME_PLACEHOLDER|$AGENT_NAME|g" \
   -e "s|PI_MODEL_PLACEHOLDER|$PI_MODEL|g" \
+  -e "s|PI_PROVIDER_PLACEHOLDER|$PI_PROVIDER|g" \
   -e "s|COMS_PROJECT_PLACEHOLDER|$COMS_PROJECT|g" \
   -e "s|AGENT_PURPOSE_PLACEHOLDER|$AGENT_PURPOSE|g" \
   "$AGENT_HOME/bin/start-pi-agent.sh"

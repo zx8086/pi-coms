@@ -146,6 +146,30 @@ resource "aws_iam_role_policy" "agent_cost_read" {
   })
 }
 
+// Claude via Bedrock under the instance role: no provider API keys anywhere.
+// Cross-region inference profiles need invoke on both the profile and the
+// underlying foundation models in the destination regions.
+resource "aws_iam_role_policy" "agent_bedrock_invoke" {
+  count = var.enable_bedrock ? 1 : 0
+  name  = "bedrock-invoke-anthropic"
+  role  = aws_iam_role.agent.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+      ]
+      Resource = [
+        "arn:aws:bedrock:*::foundation-model/anthropic.*",
+        "arn:aws:bedrock:${local.region}:${local.account_id}:inference-profile/eu.anthropic.*",
+      ]
+    }]
+  })
+}
+
 // SSM Session Manager: shell access with no inbound port and no SSH key.
 resource "aws_iam_role_policy_attachment" "agent_ssm" {
   role       = aws_iam_role.agent.name
@@ -209,6 +233,7 @@ resource "aws_instance" "agent" {
     agent_purpose    = local.agent_purpose
     coms_project     = var.coms_project
     pi_model         = var.pi_model
+    pi_provider      = var.pi_provider
     ssh_public_key   = var.ssh_public_key
     repo_url         = var.repo_url
     bundle_s3_uri    = var.bundle_s3_uri

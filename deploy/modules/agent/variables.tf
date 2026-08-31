@@ -48,9 +48,21 @@ variable "coms_project" {
 }
 
 variable "pi_model" {
-  description = "Model the agent runs, provider-qualified (a bare id can fuzzy-match the wrong provider). Passed to pi as --model."
+  description = "Model the agent runs, provider-qualified (a bare id can fuzzy-match the wrong provider). Passed to pi as --model. With pi_provider = amazon-bedrock, use a Bedrock inference-profile id, e.g. eu.anthropic.claude-sonnet-5."
   type        = string
   default     = "openai/gpt-5.4-mini"
+}
+
+variable "pi_provider" {
+  description = "Explicit pi provider (--provider). Set to amazon-bedrock to run models through Bedrock under the instance role (no API keys; pair with enable_bedrock). Empty lets pi resolve the provider from the model id."
+  type        = string
+  default     = ""
+}
+
+variable "enable_bedrock" {
+  description = "Grant the instance role bedrock:InvokeModel(+WithResponseStream) on Anthropic foundation models and this account's eu.anthropic.* inference profiles."
+  type        = bool
+  default     = false
 }
 
 variable "instance_type" {

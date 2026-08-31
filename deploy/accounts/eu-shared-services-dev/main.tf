@@ -77,9 +77,9 @@ variable "allowed_cidrs" {
 }
 
 variable "pi_model" {
-  description = "Provider-qualified model for the agent."
+  description = "Bedrock inference-profile id the agent runs. EU profiles keep inference inside EU regions."
   type        = string
-  default     = "openai/gpt-5.4-mini"
+  default     = "eu.anthropic.claude-sonnet-5"
 }
 
 variable "org_id" {
@@ -153,6 +153,8 @@ module "agent" {
   associate_public_ip = false
   instance_type       = "t4g.micro"
   pi_model            = var.pi_model
+  pi_provider         = "amazon-bedrock"
+  enable_bedrock      = true
   bundle_s3_uri       = local.bundle_s3_uri
   dist_bucket_arn     = aws_s3_bucket.dist.arn
 
