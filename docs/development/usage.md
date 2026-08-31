@@ -68,6 +68,8 @@ ask monitor-aws-356994971776 to run-checks    # run the check families now
 
 Its incident reports and daily digest arrive addressed to `laptop` (configurable via `PI_MONITOR_REPORT_TO`) with a long TTL: if no `laptop` session is connected, they wait in the hub mailbox and flush into your next session automatically. A quiet day still produces the digest -- silence past a day means the monitor itself is down. Details: [Monitoring](../architecture/monitoring.md).
 
+Delivered reports stay readable: "show my inbox" or "show the ops inbox" calls `coms_net_inbox`, which lists retained mailbox messages non-destructively -- every operator sees the same history on demand, regardless of who received the push.
+
 ## In-session commands
 
 | Command | Effect |

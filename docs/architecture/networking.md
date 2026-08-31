@@ -84,6 +84,7 @@ All routes except `/health` require `Authorization: Bearer <token>`. Full behavi
 | POST | `/v1/agents/:session_id/heartbeat` | Liveness plus context/queue stats |
 | DELETE | `/v1/agents/:session_id` | Deregister |
 | POST | `/v1/messages` | Send a prompt to one target; optional `ttl_ms` queues durably for an offline name (see [Monitoring](monitoring.md#the-hub-mailbox)) |
+| GET | `/v1/mailbox` | Durable inbox for a name: read-many, non-destructive, `since` msg_id cursor |
 | GET | `/v1/messages/:id` | Non-blocking status poll |
 | GET | `/v1/messages/:id/await` | Long-poll until terminal or timeout |
 | POST | `/v1/messages/:id/response` | Target submits the reply |
