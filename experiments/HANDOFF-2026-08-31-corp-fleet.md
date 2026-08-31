@@ -67,10 +67,29 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
 ## Next steps
 
 1. Operator: mark SIO-1583 Done (never set Done without their explicit word).
-2. Re-test with new permissions: ask both agents "what shuts services down in
-   your account, from configuration only?" -- should now name the EventBridge
-   schedules and the ~50 Application Auto Scaling scheduled actions instead of
-   CloudTrail archaeology.
+2. DONE 2026-08-31 evening -- re-test with new permissions passed. Both agents
+   answered the shutdown question from configuration: ECS scale-to-zero via
+   Application Auto Scaling scheduled actions (shared: 64 actions, down 17:00
+   up 08:00 MON-FRI Europe/Amsterdam, off all weekend; oit: 46 actions, down
+   00:00 up 07:30 daily) plus an EventBridge Scheduler pair invoking
+   `lambda-shutdown-rds` per account (shared 18:00/07:00 MON-FRI; oit
+   00:00/07:00 daily). Grounded negatives across the board (no ASGs, no
+   maintenance windows, no Instance Scheduler), scope disclosed (shared
+   checked eu-central-1 only; oit swept all 17 regions).
+   Findings for the ACCOUNT OWNERS surfaced by the run: both accounts have
+   `kong-konnect-proxy-service` with ScheduledScalingSuspended=true; shared
+   has two kong services whose scale-UP actions set 0/0 (never come back) and
+   four services never zeroed; both accounts carry enabled EventBridge rules
+   with zero targets.
+   New permission facts from the run:
+   - `ssm:ListDocuments` / `ssm:ListAssociations` denied in both -- real gap;
+     SSM Automation-document schedulers are unchecked. Candidate addition to
+     `pi-coms-dev-extensions`.
+   - The `kms:Decrypt` Deny blocks `lambda:GetFunctionConfiguration` wherever
+     Lambda env vars are CMK-encrypted (observed in oit). Working as intended
+     for secret hygiene, but it means the shutdown Lambda's targeting logic is
+     unreadable in such accounts -- accepted trade-off, revisit only if the
+     operator wants a scoped exception.
 3. Operator laptop: restart the SSM tunnel against hub id
    `i-042d0fed0cb5d8702` (port 8787; URL unchanged thanks to the pinned IP);
    restart the coms session to load the AGENTS.md parity rule.
