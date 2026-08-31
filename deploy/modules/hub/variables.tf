@@ -51,6 +51,12 @@ variable "port" {
   default     = 8787
 }
 
+variable "auth_ssm_path" {
+  description = "SSM parameter path holding per-principal tokens (e.g. /pi-coms/auth). When set, the hub runs in directory mode: name-bound tokens, per-principal revocation, principal-attributed audit log; the shared coms_auth_token stays valid as the root/migration principal. Empty keeps single-token mode."
+  type        = string
+  default     = ""
+}
+
 variable "associate_public_ip" {
   description = "Give the host a public IP. Leave false for the intended private-subnet placement."
   type        = bool

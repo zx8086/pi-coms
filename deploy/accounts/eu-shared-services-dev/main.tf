@@ -138,6 +138,12 @@ locals {
   bundle_s3_uri = "s3://${aws_s3_bucket.dist.bucket}/fleet"
 }
 
+// Directory mode from day one: per-principal tokens under /pi-coms/auth.
+// Create principals with `just token-create <name> <names-csv> <kind>
+// eu-shared-services-dev`; the shared coms_auth_token stays valid as the
+// root/migration principal. To move an agent onto its own token, create its
+// principal here and put the same value into the agent account's auth-token
+// parameter, then re-run its bootstrap.
 module "hub" {
   source = "../../modules/hub"
 
@@ -147,6 +153,7 @@ module "hub" {
   repo_url        = var.repo_url
   bundle_s3_uri   = local.bundle_s3_uri
   dist_bucket_arn = aws_s3_bucket.dist.arn
+  auth_ssm_path   = "/pi-coms/auth"
 }
 
 module "agent" {

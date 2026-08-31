@@ -88,6 +88,17 @@ resource "aws_iam_role_policy" "hub_secret" {
         Action   = ["ssm:GetParameter"]
         Resource = [aws_ssm_parameter.coms_token.arn]
       }],
+      // Directory mode: the hub polls the per-principal token path. Read-only
+      // on exactly that path; token administration stays with IAM principals
+      // granted PutParameter/DeleteParameter on it (just token-create/revoke).
+      var.auth_ssm_path == "" ? [] : [{
+        Effect = "Allow"
+        Action = ["ssm:GetParametersByPath", "ssm:GetParameter"]
+        Resource = [
+          "arn:aws:ssm:${local.region}:${data.aws_caller_identity.current.account_id}:parameter${var.auth_ssm_path}",
+          "arn:aws:ssm:${local.region}:${data.aws_caller_identity.current.account_id}:parameter${var.auth_ssm_path}/*",
+        ]
+      }],
       var.dist_bucket_arn == "" ? [] : [{
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:ListBucket"]
@@ -124,6 +135,7 @@ resource "aws_instance" "hub" {
     repo_url         = var.repo_url
     port             = var.port
     bundle_s3_uri    = var.bundle_s3_uri
+    auth_ssm_path    = var.auth_ssm_path
   })
 
   metadata_options {

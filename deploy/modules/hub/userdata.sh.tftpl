@@ -49,6 +49,12 @@ ENV_FILE="$HUB_HOME/.hub-env"
   echo "export PI_COMS_NET_HOST=0.0.0.0"
   echo "export PI_COMS_NET_PORT=${port}"
   echo "export PI_COMS_NET_AUTH_TOKEN='$TOKEN'"
+  if [ -n '${auth_ssm_path}' ]; then
+    # Directory mode: per-principal tokens polled from Parameter Store; the
+    # shared token above stays valid as the root/migration principal.
+    echo "export PI_COMS_NET_AUTH_SSM_PATH='${auth_ssm_path}'"
+    echo "export AWS_REGION='${region}'"
+  fi
 } > "$ENV_FILE"
 chown "$HUB_USER:$HUB_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
