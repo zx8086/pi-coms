@@ -86,6 +86,11 @@ operator role.
   a failed or dropped call -- report it and whether a retry succeeded.
 - Distinguish "the agent observed X absent" from "the agent was not asked"
   from "the agent hit an auth error". These are three different claims.
+- A denial observed in one account proves nothing about another, and one
+  agent attempting a call the other never tried is not a permission
+  difference. All accounts run the same policy by construction; before
+  reporting a cross-account permission asymmetry, have each agent attempt
+  the identical call and compare the actual error envelopes.
 - No emojis, no em dashes in any output.
 
 ## Hygiene
