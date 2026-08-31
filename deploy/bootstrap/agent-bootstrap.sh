@@ -37,6 +37,10 @@
 #     BUNDLE_S3_URI   S3 prefix of the fleet bundle (bundle.tar.gz + version).
 #                     When set, code comes from S3 instead of git and the
 #                     pi-coms-update convergence script is installed.
+#     READONLY_ROLE_ARN     DevOpsAgentReadOnly role ARN. When set (with
+#     READONLY_EXTERNAL_ID  the ExternalId), the piagent workload assumes it
+#                           for every AWS call via an AWS_PROFILE; the
+#                           instance role stays host plumbing only.
 set -euo pipefail
 
 AGENT_USER="${AGENT_USER:-piagent}"
@@ -191,10 +195,35 @@ ENV_FILE="$AGENT_HOME/.coms-env"
   # With the default aws-<account_id> name this matches the old derivation.
   echo "export PI_MONITOR_NAME='monitor-$AGENT_NAME'"
   echo "export PI_MONITOR_INVESTIGATE_TARGET='$AGENT_NAME'"
+  # Route the whole piagent workload (agent, monitor, aws CLI) through the
+  # account's DevOpsAgentReadOnly when configured; the ini profile below
+  # chains from the instance role with auto-refresh.
+  if [ -n "${READONLY_ROLE_ARN:-}" ]; then echo "export AWS_PROFILE='devops-readonly'"; fi
   if [ -n "$PROVIDER_EXPORTS" ]; then echo "$PROVIDER_EXPORTS"; fi
 } > "$ENV_FILE"
 chown "$AGENT_USER:$AGENT_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
+
+# ── DevOpsAgentReadOnly profile ────────────────────────────────────────────
+# The assumed-role session is where all investigation reads (and, in Bedrock
+# deployments, model calls) run; CloudTrail attributes them to the role,
+# distinct from instance-role host plumbing.
+if [ -n "${READONLY_ROLE_ARN:-}" ]; then
+  : "${READONLY_EXTERNAL_ID:?READONLY_EXTERNAL_ID required with READONLY_ROLE_ARN}"
+  install -d -m 700 -o "$AGENT_USER" -g "$AGENT_USER" "$AGENT_HOME/.aws"
+  cat > "$AGENT_HOME/.aws/config" <<AWSCFG
+[default]
+region = ${AWS_REGION:-us-east-1}
+
+[profile devops-readonly]
+role_arn = $READONLY_ROLE_ARN
+credential_source = Ec2InstanceMetadata
+external_id = $READONLY_EXTERNAL_ID
+region = ${AWS_REGION:-us-east-1}
+AWSCFG
+  chown "$AGENT_USER:$AGENT_USER" "$AGENT_HOME/.aws/config"
+  chmod 600 "$AGENT_HOME/.aws/config"
+fi
 
 # ── SSH access for `herdr --remote` ────────────────────────────────────────
 SSH_PUBKEY="${SSH_PUBLIC_KEY:-}"

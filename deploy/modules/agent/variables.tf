@@ -59,6 +59,24 @@ variable "pi_provider" {
   default     = ""
 }
 
+variable "readonly_role" {
+  description = "Create the account's DevOpsAgentReadOnly role (mirroring the prod incident-analyzer role and policies, vendored in policies/) and route all agent/monitor AWS reads through it via same-account AssumeRole. The instance role slims to host plumbing (SSM, parameters, S3 bundle, Bedrock). False keeps the legacy ViewOnlyAccess-on-instance-role model."
+  type        = bool
+  default     = false
+}
+
+variable "readonly_external_id" {
+  description = "ExternalId required to assume DevOpsAgentReadOnly (prod uses devops-agent-prod-access)."
+  type        = string
+  default     = "devops-agent-dev-access"
+}
+
+variable "readonly_extra_trusted_arns" {
+  description = "Additional principals allowed to assume DevOpsAgentReadOnly, e.g. the prod DevOpsAgentCoreRole if the incident analyzer later monitors this account."
+  type        = list(string)
+  default     = []
+}
+
 variable "enable_bedrock" {
   description = "Grant the instance role bedrock:InvokeModel(+WithResponseStream) on Anthropic foundation models and this account's eu.anthropic.* inference profiles."
   type        = bool

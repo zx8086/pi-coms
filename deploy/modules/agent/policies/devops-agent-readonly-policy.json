@@ -1,0 +1,185 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "IdentityAndAccountDiscovery",
+            "Effect": "Allow",
+            "Action": ["sts:GetCallerIdentity"],
+            "Resource": "*"
+        },
+        {
+            "Sid": "RegionalAndNetworkTopology",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeRegions",
+                "ec2:DescribeAvailabilityZones",
+                "ec2:DescribeVpcs",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeRouteTables",
+                "ec2:DescribeSecurityGroups",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:DescribeVpcEndpoints",
+                "ec2:DescribeAddresses",
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "elasticloadbalancing:DescribeListeners",
+                "elasticloadbalancing:DescribeTargetGroups",
+                "elasticloadbalancing:DescribeTargetHealth"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ComputeContainersAndServerlessRead",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceStatus",
+                "ec2:DescribeLaunchTemplates",
+                "ec2:DescribeImages",
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "ecs:ListClusters",
+                "ecs:DescribeClusters",
+                "ecs:ListServices",
+                "ecs:DescribeServices",
+                "ecs:ListTasks",
+                "ecs:DescribeTasks",
+                "ecs:DescribeTaskDefinition",
+                "ecs:ListContainerInstances",
+                "ecs:DescribeContainerInstances",
+                "eks:ListClusters",
+                "eks:DescribeCluster",
+                "lambda:ListFunctions",
+                "lambda:GetFunctionConfiguration",
+                "lambda:ListEventSourceMappings"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "DatastoresAndStorageRead",
+            "Effect": "Allow",
+            "Action": [
+                "rds:DescribeDBInstances",
+                "rds:DescribeDBClusters",
+                "dynamodb:ListTables",
+                "dynamodb:DescribeTable",
+                "elasticache:DescribeCacheClusters",
+                "elasticache:DescribeReplicationGroups",
+                "s3:ListAllMyBuckets",
+                "s3:GetBucketLocation",
+                "s3:GetBucketVersioning",
+                "s3:GetBucketEncryption",
+                "s3:GetBucketPublicAccessBlock",
+                "s3:GetBucketTagging",
+                "s3:GetBucketPolicyStatus"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "MessagingAndIntegrationRead",
+            "Effect": "Allow",
+            "Action": [
+                "sns:ListTopics",
+                "sns:GetTopicAttributes",
+                "sqs:ListQueues",
+                "sqs:GetQueueAttributes",
+                "events:ListEventBuses",
+                "events:ListRules",
+                "events:DescribeRule",
+                "events:ListTargetsByRule",
+                "states:ListStateMachines",
+                "states:DescribeStateMachine"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "MetricsAlarmsAndDashboardsRead",
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:ListMetrics",
+                "cloudwatch:GetMetricData",
+                "cloudwatch:GetMetricStatistics",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:DescribeAlarmsForMetric",
+                "cloudwatch:GetDashboard",
+                "cloudwatch:ListDashboards"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "LogsListUnscoped",
+            "Effect": "Allow",
+            "Action": ["logs:DescribeLogGroups", "logs:DescribeLogStreams"],
+            "Resource": "*"
+        },
+        {
+            "Sid": "LogsReadLimitedByName",
+            "Effect": "Allow",
+            "Action": [
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents",
+                "logs:StartQuery",
+                "logs:GetQueryResults",
+                "logs:StopQuery"
+            ],
+            "Resource": [
+                "arn:aws:logs:*:*:log-group:/aws/*",
+                "arn:aws:logs:*:*:log-group:/ecs/*",
+                "arn:aws:logs:*:*:log-group:/app/*",
+                "arn:aws:logs:*:*:log-group:/platform/*",
+                "arn:aws:logs:*:*:log-group:/prod/*",
+                "arn:aws:logs:*:*:log-group:/bedrock/*"
+            ]
+        },
+        {
+            "Sid": "TracingAndServiceMapRead",
+            "Effect": "Allow",
+            "Action": ["xray:GetServiceGraph", "xray:GetTraceSummaries", "xray:BatchGetTraces", "xray:GetGroups"],
+            "Resource": "*"
+        },
+        {
+            "Sid": "AwsHealthAndConfigRead",
+            "Effect": "Allow",
+            "Action": [
+                "health:DescribeEvents",
+                "health:DescribeEventDetails",
+                "config:DescribeConfigRules",
+                "config:DescribeComplianceByConfigRule",
+                "config:ListDiscoveredResources",
+                "config:GetDiscoveredResourceCounts"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "CloudFormationAndDeploymentContext",
+            "Effect": "Allow",
+            "Action": [
+                "cloudformation:ListStacks",
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:GetTemplate",
+                "cloudformation:ListStackResources",
+                "tag:GetResources",
+                "tag:GetTagKeys",
+                "tag:GetTagValues"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SecurityAndAuditRead",
+            "Effect": "Allow",
+            "Action": [
+                "cloudtrail:DescribeTrails",
+                "cloudtrail:GetTrailStatus",
+                "cloudtrail:ListTrails",
+                "securityhub:GetFindings",
+                "securityhub:DescribeHub",
+                "securityhub:GetEnabledStandards",
+                "guardduty:ListDetectors",
+                "guardduty:GetDetector",
+                "guardduty:ListFindings",
+                "guardduty:GetFindings"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

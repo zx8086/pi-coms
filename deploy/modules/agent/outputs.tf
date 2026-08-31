@@ -16,8 +16,13 @@ output "agent_instance_id" {
 }
 
 output "agent_role_arn" {
-  description = "IAM role the agent runs with. Widen this to grant more than ViewOnlyAccess."
+  description = "Instance role of the agent host (host plumbing in readonly mode)."
   value       = aws_iam_role.agent.arn
+}
+
+output "devops_readonly_role_arn" {
+  description = "DevOpsAgentReadOnly role the workload assumes for AWS reads (empty when readonly_role = false)."
+  value       = var.readonly_role ? aws_iam_role.devops_readonly[0].arn : ""
 }
 
 output "provider_keys_parameter_name" {

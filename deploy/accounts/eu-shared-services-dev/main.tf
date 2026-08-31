@@ -169,6 +169,7 @@ module "agent" {
   pi_model            = var.pi_model
   pi_provider         = "amazon-bedrock"
   enable_bedrock      = true
+  readonly_role       = true
   bundle_s3_uri       = local.bundle_s3_uri
   dist_bucket_arn     = aws_s3_bucket.dist.arn
 
