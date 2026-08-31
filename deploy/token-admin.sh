@@ -48,9 +48,9 @@ for p in json.load(sys.stdin).get("Parameters", []):
     name = p["Name"].split("/")[-1]
     try:
         v = json.loads(p["Value"])
-        print(f"{name:24} kind={v.get(\"kind\",\"?\"):10} names={\",\".join(v.get(\"names\",[]))}")
+        print("{:24} kind={:10} names={}".format(name, v.get("kind", "?"), ",".join(v.get("names", []))))
     except Exception:
-        print(f"{name:24} (malformed entry)")
+        print("{:24} (malformed entry)".format(name))
 '
     ;;
   *)
