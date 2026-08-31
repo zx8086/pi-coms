@@ -30,6 +30,8 @@
 #     PI_PROVIDER     explicit pi --provider; amazon-bedrock runs models under
 #                     the instance role with no API keys. Empty = derive from model
 #     COMS_PROJECT    (default "default")
+#     MONITOR_REPORT_TO peer receiving monitor reports and the daily digest
+#                     (default ops)
 #     REPO_URL        clone URL of this repo (required)
 #     AWS_ACCOUNT_ID  exported to the agent env when set
 #     SSH_PUBLIC_KEY  authorizes one key for AGENT_USER (herdr --remote)
@@ -236,6 +238,9 @@ ENV_FILE="$AGENT_HOME/.coms-env"
   # With the default aws-<account_id> name this matches the old derivation.
   echo "export PI_MONITOR_NAME='monitor-$AGENT_NAME'"
   echo "export PI_MONITOR_INVESTIGATE_TARGET='$AGENT_NAME'"
+  # Reports and the daily digest need an owner that is not the operator's
+  # laptop (only online when the operator is); ops is the named owner (O10).
+  echo "export PI_MONITOR_REPORT_TO='${MONITOR_REPORT_TO:-ops}'"
   # Route the whole piagent workload (agent, monitor, aws CLI) through the
   # account's DevOpsAgentReadOnly when configured; the ini profile below
   # chains from the instance role with auto-refresh.

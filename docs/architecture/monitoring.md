@@ -91,7 +91,7 @@ Findings of severity warn or critical go to the account's Pi agent (`aws-<accoun
 
 ### Reports
 
-Both report kinds go to `PI_MONITOR_REPORT_TO` (default `laptop`) with a long TTL, so they wait in the hub mailbox when the operator is offline:
+Both report kinds go to `PI_MONITOR_REPORT_TO` (code default `laptop`; the bootstrap sets `ops` on deployed hosts) with a long TTL, so they wait in the hub mailbox when the operator is offline:
 
 1. **Incident report** whenever a run has findings: severity-first summary, per-finding diagnosis and evidence. Recoveries ship as info.
 2. **Daily digest** even when quiet: 24 h finding counts, check errors, current ALARM states, spend vs baseline. A missing digest is itself the monitor's dead-man signal.
@@ -120,7 +120,7 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | Variable | Default | Controls |
 |----------|---------|----------|
 | `PI_MONITOR_NAME` | `monitor-aws-<account_id>` | Peer name |
-| `PI_MONITOR_REPORT_TO` | `laptop` | Report recipient (a peer name) |
+| `PI_MONITOR_REPORT_TO` | `laptop` (bootstrap sets `ops`) | Report recipient (a peer name) |
 | `PI_MONITOR_REPORT_TTL_MS` | `1209600000` (14 d) | Mailbox TTL on reports |
 | `PI_MONITOR_CHECK_CRON` | `*/15 * * * *` | Alarm/log/drift cadence |
 | `PI_MONITOR_DAILY_CRON` | `@daily` | Cost check + digest (midnight UTC) |
