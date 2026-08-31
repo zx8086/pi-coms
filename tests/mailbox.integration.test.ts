@@ -28,7 +28,7 @@ describe("mailbox send", () => {
 		expect(r2.status).toBe(404);
 	});
 
-	test("ttl_ms is capped by PI_COMS_NET_MAX_TTL_MS default 7 days", async () => {
+	test("ttl_ms is capped by PI_COMS_NET_MAX_TTL_MS default 14 days", async () => {
 		const hub = await startHub();
 		await register(hub, "SENDER", "monitor");
 		const r = await send(hub, "SENDER", "laptop", "hi", 999_999_999_999);
@@ -41,8 +41,8 @@ describe("mailbox send", () => {
 			.query("SELECT expires_at FROM messages")
 			.get() as any;
 		const ttl = Date.parse(row.expires_at) - Date.now();
-		expect(ttl).toBeLessThanOrEqual(604_800_000 + 5_000);
-		expect(ttl).toBeGreaterThan(600_000_000);
+		expect(ttl).toBeLessThanOrEqual(1_209_600_000 + 5_000);
+		expect(ttl).toBeGreaterThan(1_200_000_000);
 	});
 
 	test("online target with long ttl delivers normally", async () => {

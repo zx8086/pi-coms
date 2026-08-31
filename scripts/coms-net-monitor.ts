@@ -30,7 +30,7 @@ import { MonitorState } from "./monitor/state.ts";
 const ACCOUNT_ID = process.env.AWS_ACCOUNT_ID ?? "unknown";
 const MONITOR_NAME = process.env.PI_MONITOR_NAME ?? `monitor-aws-${ACCOUNT_ID}`;
 const REPORT_TO = process.env.PI_MONITOR_REPORT_TO ?? "laptop";
-const REPORT_TTL_MS = Number(process.env.PI_MONITOR_REPORT_TTL_MS ?? 604_800_000);
+const REPORT_TTL_MS = Number(process.env.PI_MONITOR_REPORT_TTL_MS ?? 1_209_600_000);
 const CHECK_CRON = process.env.PI_MONITOR_CHECK_CRON ?? "*/15 * * * *";
 const DAILY_CRON = process.env.PI_MONITOR_DAILY_CRON ?? "@daily";
 const INVESTIGATE_TARGET = process.env.PI_MONITOR_INVESTIGATE_TARGET ?? `aws-${ACCOUNT_ID}`;

@@ -31,7 +31,7 @@ The hub (`scripts/coms-net-server.ts`) stores messages in `bun:sqlite` at `~/.pi
 
 ### Two TTLs
 
-`POST /v1/messages` accepts an optional `ttl_ms`, capped by `PI_COMS_NET_MAX_TTL_MS` (default 7 days). The default TTL stays 30 minutes (`PI_COMS_NET_MESSAGE_TTL_MS`).
+`POST /v1/messages` accepts an optional `ttl_ms`, capped by `PI_COMS_NET_MAX_TTL_MS` (default 14 days). The default TTL stays 30 minutes (`PI_COMS_NET_MESSAGE_TTL_MS`).
 
 | Send | Target online | Target offline |
 |------|---------------|----------------|
@@ -54,7 +54,7 @@ On boot the hub reloads all non-terminal messages from every project's `messages
 
 ### What changed about the hub's trust posture
 
-The hub used to store nothing durable. It now persists **prompt and response bodies at rest** in `messages.db` until delivery plus sweep (up to 7 days for mailbox sends). See [Security Model](../security/security-model.md#hub-data-at-rest).
+The hub used to store nothing durable. It now persists **prompt and response bodies at rest** in `messages.db` until delivery plus sweep (up to 14 days for mailbox sends). See [Security Model](../security/security-model.md#hub-data-at-rest).
 
 ---
 
@@ -121,7 +121,7 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 |----------|---------|----------|
 | `PI_MONITOR_NAME` | `monitor-aws-<account_id>` | Peer name |
 | `PI_MONITOR_REPORT_TO` | `laptop` | Report recipient (a peer name) |
-| `PI_MONITOR_REPORT_TTL_MS` | `604800000` (7 d) | Mailbox TTL on reports |
+| `PI_MONITOR_REPORT_TTL_MS` | `1209600000` (14 d) | Mailbox TTL on reports |
 | `PI_MONITOR_CHECK_CRON` | `*/15 * * * *` | Alarm/log/drift cadence |
 | `PI_MONITOR_DAILY_CRON` | `@daily` | Cost check + digest (midnight UTC) |
 | `PI_MONITOR_INVESTIGATE_TARGET` | `aws-<account_id>` | Peer that investigates findings |
@@ -129,7 +129,7 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | `PI_MONITOR_COST_PCT` / `PI_MONITOR_COST_ABS` | `20` / `1` | Cost anomaly double threshold |
 | `PI_MONITOR_STATE_DB` | `~/.pi/monitor/state.db` | State location |
 
-Hub-side: `PI_COMS_NET_MAX_TTL_MS` (default `604800000`) caps any requested `ttl_ms`.
+Hub-side: `PI_COMS_NET_MAX_TTL_MS` (default `1209600000`, 14 days) caps any requested `ttl_ms`.
 
 ### IAM
 
