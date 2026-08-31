@@ -6,9 +6,21 @@ variable "hub_url" {
 }
 
 variable "coms_auth_token" {
-  description = "Shared bearer token for the hub. Same value the hub runs with; stored in this account's Secrets Manager so the instance fetches it at boot via its role."
+  description = "Shared bearer token for the hub. Same value the hub runs with; stored as an SSM SecureString parameter in this account so the instance fetches it at boot via its role."
   type        = string
   sensitive   = true
+}
+
+variable "bundle_s3_uri" {
+  description = "S3 URI of the fleet-bundle prefix (e.g. s3://pi-coms-dist/fleet). When set, the host fetches code from the bundle instead of cloning repo_url, and installs the pi-coms-update convergence script. Empty keeps the git path."
+  type        = string
+  default     = ""
+}
+
+variable "dist_bucket_arn" {
+  description = "ARN of the distribution bucket backing bundle_s3_uri; grants the instance read access. Required when bundle_s3_uri is set."
+  type        = string
+  default     = ""
 }
 
 variable "name_prefix" {
@@ -36,9 +48,39 @@ variable "coms_project" {
 }
 
 variable "pi_model" {
-  description = "Model the agent runs, provider-qualified (a bare id can fuzzy-match the wrong provider). Passed to pi as --model."
+  description = "Model the agent runs, provider-qualified (a bare id can fuzzy-match the wrong provider). Passed to pi as --model. With pi_provider = amazon-bedrock, use a Bedrock inference-profile id, e.g. eu.anthropic.claude-sonnet-5."
   type        = string
   default     = "openai/gpt-5.4-mini"
+}
+
+variable "pi_provider" {
+  description = "Explicit pi provider (--provider). Set to amazon-bedrock to run models through Bedrock under the instance role (no API keys; pair with enable_bedrock). Empty lets pi resolve the provider from the model id."
+  type        = string
+  default     = ""
+}
+
+variable "readonly_role" {
+  description = "Create the account's DevOpsAgentReadOnly role (mirroring the prod incident-analyzer role and policies, vendored in policies/) and route all agent/monitor AWS reads through it via same-account AssumeRole. The instance role slims to host plumbing (SSM, parameters, S3 bundle, Bedrock). False keeps the legacy ViewOnlyAccess-on-instance-role model."
+  type        = bool
+  default     = false
+}
+
+variable "readonly_external_id" {
+  description = "ExternalId required to assume DevOpsAgentReadOnly (prod uses devops-agent-prod-access)."
+  type        = string
+  default     = "devops-agent-dev-access"
+}
+
+variable "readonly_extra_trusted_arns" {
+  description = "Additional principals allowed to assume DevOpsAgentReadOnly, e.g. the prod DevOpsAgentCoreRole if the incident analyzer later monitors this account."
+  type        = list(string)
+  default     = []
+}
+
+variable "enable_bedrock" {
+  description = "Grant the instance role bedrock:InvokeModel(+WithResponseStream) on Anthropic foundation models and this account's eu.anthropic.* inference profiles."
+  type        = bool
+  default     = false
 }
 
 variable "instance_type" {
@@ -51,6 +93,12 @@ variable "subnet_id" {
   description = "Subnet for the agent host. Empty string uses the default VPC's first default subnet. The host gets a public IP for egress (hub, installs) instead of a NAT gateway; its security group allows no inbound."
   type        = string
   default     = ""
+}
+
+variable "associate_public_ip" {
+  description = "Give the host a public IP for egress (no-NAT default-VPC pattern). Set false when subnet_id is a private subnet behind a NAT gateway; a public IP there is useless and often policy-violating."
+  type        = bool
+  default     = true
 }
 
 variable "ssh_public_key" {

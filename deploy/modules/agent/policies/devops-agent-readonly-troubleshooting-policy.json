@@ -1,0 +1,162 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "NetworkPathConnectivityRead",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeVpcEndpoints",
+                "ec2:DescribeVpcEndpointServices",
+                "ec2:DescribeVpcEndpointConnections",
+                "ec2:DescribeVpcEndpointServiceConfigurations",
+                "ec2:DescribeNatGateways",
+                "ec2:DescribeInternetGateways",
+                "ec2:DescribeEgressOnlyInternetGateways",
+                "ec2:DescribeNetworkAcls",
+                "ec2:DescribeVpcPeeringConnections",
+                "ec2:DescribeVpcAttribute",
+                "ec2:DescribeSecurityGroupRules",
+                "ec2:DescribeDhcpOptions",
+                "ec2:DescribePrefixLists",
+                "ec2:DescribeManagedPrefixLists",
+                "ec2:GetManagedPrefixListEntries",
+                "ec2:DescribeFlowLogs",
+                "ec2:DescribeTransitGateways",
+                "ec2:DescribeTransitGatewayAttachments",
+                "ec2:DescribeTransitGatewayVpcAttachments",
+                "ec2:DescribeTransitGatewayRouteTables",
+                "ec2:SearchTransitGatewayRoutes",
+                "ec2:DescribeNetworkInsightsPaths",
+                "ec2:DescribeNetworkInsightsAnalyses",
+                "ec2:DescribeVpnConnections",
+                "ec2:DescribeVpnGateways",
+                "ec2:DescribeCustomerGateways",
+                "ec2:DescribeClientVpnEndpoints",
+                "elasticloadbalancing:DescribeLoadBalancerAttributes",
+                "elasticloadbalancing:DescribeTargetGroupAttributes",
+                "elasticloadbalancing:DescribeRules",
+                "elasticloadbalancing:DescribeTags",
+                "elasticloadbalancing:DescribeSSLPolicies",
+                "network-firewall:DescribeFirewall",
+                "network-firewall:DescribeFirewallPolicy",
+                "network-firewall:DescribeLoggingConfiguration",
+                "network-firewall:ListFirewalls",
+                "directconnect:DescribeConnections",
+                "directconnect:DescribeVirtualInterfaces"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "DnsResolutionRead",
+            "Effect": "Allow",
+            "Action": [
+                "route53:ListHostedZones",
+                "route53:GetHostedZone",
+                "route53:ListResourceRecordSets",
+                "route53:ListHealthChecks",
+                "route53:GetHealthCheckStatus",
+                "route53resolver:ListResolverEndpoints",
+                "route53resolver:ListResolverRules",
+                "route53resolver:ListResolverRuleAssociations",
+                "route53resolver:ListResolverQueryLogConfigs"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "MskStreamingRead",
+            "Effect": "Allow",
+            "Action": [
+                "kafka:ListClustersV2",
+                "kafka:DescribeClusterV2",
+                "kafka:GetBootstrapBrokers",
+                "kafka:ListNodes",
+                "kafka:DescribeConfiguration",
+                "kafka:ListClientVpcConnections",
+                "kafka:ListClusterOperationsV2"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ChangeAndAccessDiagnosisRead",
+            "Effect": "Allow",
+            "Action": [
+                "sts:DecodeAuthorizationMessage",
+                "kms:DescribeKey",
+                "kms:ListAliases",
+                "kms:GetKeyPolicy",
+                "kms:GetKeyRotationStatus",
+                "config:GetResourceConfigHistory",
+                "config:BatchGetResourceConfig",
+                "config:SelectResourceConfig",
+                "config:DescribeConfigurationRecorderStatus",
+                "cloudtrail:LookupEvents",
+                "cloudtrail:GetEventSelectors"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "DeploymentScalingImageAndQuotaRead",
+            "Effect": "Allow",
+            "Action": [
+                "autoscaling:DescribeScalingActivities",
+                "autoscaling:DescribePolicies",
+                "application-autoscaling:DescribeScalableTargets",
+                "application-autoscaling:DescribeScalingPolicies",
+                "application-autoscaling:DescribeScalingActivities",
+                "ecs:ListTaskDefinitions",
+                "ecs:ListTaskDefinitionFamilies",
+                "ecs:DescribeCapacityProviders",
+                "ecr:DescribeRepositories",
+                "ecr:DescribeImages",
+                "ecr:ListImages",
+                "ecr:GetRepositoryPolicy",
+                "ecr:GetLifecyclePolicy",
+                "cloudformation:DescribeStackResourceDrifts",
+                "cloudformation:DescribeStackResource",
+                "cloudformation:ListExports",
+                "cloudformation:ListImports",
+                "cloudformation:DescribeChangeSet",
+                "cloudformation:ListChangeSets",
+                "servicequotas:ListServiceQuotas",
+                "servicequotas:GetServiceQuota"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ServiceContextAndConfigMetadataRead",
+            "Effect": "Allow",
+            "Action": [
+                "lambda:GetFunction",
+                "lambda:GetPolicy",
+                "lambda:GetAccountSettings",
+                "states:DescribeExecution",
+                "states:ListExecutions",
+                "states:GetExecutionHistory",
+                "rds:DescribeEvents",
+                "elasticache:DescribeEvents",
+                "health:DescribeAffectedEntities",
+                "health:DescribeEventAggregates",
+                "logs:DescribeMetricFilters",
+                "logs:DescribeSubscriptionFilters",
+                "logs:GetLogGroupFields",
+                "ssm:DescribeParameters",
+                "secretsmanager:ListSecrets",
+                "secretsmanager:DescribeSecret"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "FlowLogsContentRead",
+            "Effect": "Allow",
+            "Action": [
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents",
+                "logs:StartQuery",
+                "logs:GetQueryResults",
+                "logs:StopQuery"
+            ],
+            "Resource": "arn:aws:logs:*:*:log-group:/vpc/flow-logs/*"
+        }
+    ]
+}

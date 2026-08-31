@@ -107,8 +107,8 @@ output "agent_role_arn" {
   value = module.agent.agent_role_arn
 }
 
-output "provider_keys_secret_name" {
-  value = module.agent.provider_keys_secret_name
+output "provider_keys_parameter_name" {
+  value = module.agent.provider_keys_parameter_name
 }
 
 output "attach_to_agent" {

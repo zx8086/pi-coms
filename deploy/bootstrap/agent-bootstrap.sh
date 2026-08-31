@@ -15,8 +15,8 @@
 #     PI_COMS_NET_SERVER_URL   hub base URL (http://127.0.0.1:8787 or https://...)
 #     SECRETS_SOURCE           "aws" or "file"
 #   SECRETS_SOURCE=aws:
-#     COMS_TOKEN_SECRET_ARN    Secrets Manager ARN holding the bearer token string
-#     PROVIDER_KEYS_SECRET_ARN Secrets Manager ARN holding a JSON object of
+#     COMS_TOKEN_PARAM         SSM SecureString parameter name holding the bearer token
+#     PROVIDER_KEYS_PARAM      SSM SecureString parameter name holding a JSON object of
 #                              provider API keys, e.g. {"OPENAI_API_KEY":"sk-..."}
 #     AWS_REGION               region for the CLI calls; exported to the agent
 #   SECRETS_SOURCE=file:
@@ -27,11 +27,20 @@
 #     AGENT_PURPOSE   (default derived from AGENT_NAME)
 #     PI_MODEL        (default openai/gpt-5.4-mini; provider-qualified -- a bare
 #                      model id can fuzzy-match the wrong provider)
+#     PI_PROVIDER     explicit pi --provider; amazon-bedrock runs models under
+#                     the instance role with no API keys. Empty = derive from model
 #     COMS_PROJECT    (default "default")
 #     REPO_URL        clone URL of this repo (required)
 #     AWS_ACCOUNT_ID  exported to the agent env when set
 #     SSH_PUBLIC_KEY  authorizes one key for AGENT_USER (herdr --remote)
 #     EXTRA_UNIT_DEPS extra systemd units pi-agent.service requires, e.g. docker.service
+#     BUNDLE_S3_URI   S3 prefix of the fleet bundle (bundle.tar.gz + version).
+#                     When set, code comes from S3 instead of git and the
+#                     pi-coms-update convergence script is installed.
+#     READONLY_ROLE_ARN     DevOpsAgentReadOnly role ARN. When set (with
+#     READONLY_EXTERNAL_ID  the ExternalId), the piagent workload assumes it
+#                           for every AWS call via an AWS_PROFILE; the
+#                           instance role stays host plumbing only.
 set -euo pipefail
 
 AGENT_USER="${AGENT_USER:-piagent}"
@@ -39,6 +48,7 @@ AGENT_HOME="/home/$AGENT_USER"
 REPO_URL="${REPO_URL:?set REPO_URL to the clone URL of this repo}"
 AGENT_NAME="${AGENT_NAME:?AGENT_NAME is required}"
 PI_MODEL="${PI_MODEL:-openai/gpt-5.4-mini}"
+PI_PROVIDER="${PI_PROVIDER:-}"
 COMS_PROJECT="${COMS_PROJECT:-default}"
 AGENT_PURPOSE="${AGENT_PURPOSE:-Pi coms-net agent $AGENT_NAME}"
 SERVER_URL="${PI_COMS_NET_SERVER_URL:?PI_COMS_NET_SERVER_URL is required}"
@@ -101,10 +111,29 @@ PROFILE
 BOOTSTRAP
 
 # ── Project checkout ───────────────────────────────────────────────────────
-if [ -d "$AGENT_HOME/pi-coms/.git" ]; then
-  sudo -u "$AGENT_USER" -H git -C "$AGENT_HOME/pi-coms" pull --ff-only
+BUNDLE_S3_URI="${BUNDLE_S3_URI:-}"
+if [ -n "$BUNDLE_S3_URI" ]; then
+  # AWS-native path: the S3 fleet bundle is the source of truth; the host
+  # never talks to GitHub. Vendored node_modules ride in the bundle.
+  command -v aws >/dev/null || { echo "aws cli required for BUNDLE_S3_URI" >&2; exit 1; }
+  TMP_BUNDLE="$(mktemp -d)"
+  aws s3 cp "$BUNDLE_S3_URI/bundle.tar.gz" "$TMP_BUNDLE/bundle.tar.gz" --region "${AWS_REGION:?AWS_REGION required with BUNDLE_S3_URI}"
+  aws s3 cp "$BUNDLE_S3_URI/version" "$TMP_BUNDLE/version" --region "$AWS_REGION" 2>/dev/null || echo unknown > "$TMP_BUNDLE/version"
+  rm -rf "$AGENT_HOME/pi-coms.new"
+  mkdir -p "$AGENT_HOME/pi-coms.new"
+  tar -xzf "$TMP_BUNDLE/bundle.tar.gz" -C "$AGENT_HOME/pi-coms.new"
+  cp "$TMP_BUNDLE/version" "$AGENT_HOME/pi-coms.new/.bundle-version"
+  rm -rf "$AGENT_HOME/pi-coms.old"
+  [ -d "$AGENT_HOME/pi-coms" ] && mv "$AGENT_HOME/pi-coms" "$AGENT_HOME/pi-coms.old"
+  mv "$AGENT_HOME/pi-coms.new" "$AGENT_HOME/pi-coms"
+  rm -rf "$AGENT_HOME/pi-coms.old" "$TMP_BUNDLE"
+  chown -R "$AGENT_USER:$AGENT_USER" "$AGENT_HOME/pi-coms"
 else
-  sudo -u "$AGENT_USER" -H git clone --depth 1 "$REPO_URL" "$AGENT_HOME/pi-coms"
+  if [ -d "$AGENT_HOME/pi-coms/.git" ]; then
+    sudo -u "$AGENT_USER" -H git -C "$AGENT_HOME/pi-coms" pull --ff-only
+  else
+    sudo -u "$AGENT_USER" -H git clone --depth 1 "$REPO_URL" "$AGENT_HOME/pi-coms"
+  fi
 fi
 sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/bun install"
 
@@ -113,20 +142,20 @@ sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/b
 
 case "$SECRETS_SOURCE" in
   aws)
-    : "${COMS_TOKEN_SECRET_ARN:?COMS_TOKEN_SECRET_ARN required for SECRETS_SOURCE=aws}"
-    : "${PROVIDER_KEYS_SECRET_ARN:?PROVIDER_KEYS_SECRET_ARN required for SECRETS_SOURCE=aws}"
+    : "${COMS_TOKEN_PARAM:?COMS_TOKEN_PARAM required for SECRETS_SOURCE=aws}"
+    : "${PROVIDER_KEYS_PARAM:?PROVIDER_KEYS_PARAM required for SECRETS_SOURCE=aws}"
     : "${AWS_REGION:?AWS_REGION required for SECRETS_SOURCE=aws}"
     command -v aws >/dev/null || { echo "aws cli not found" >&2; exit 1; }
 
-    COMS_TOKEN="$(aws secretsmanager get-secret-value \
-      --secret-id "$COMS_TOKEN_SECRET_ARN" --region "$AWS_REGION" \
-      --query SecretString --output text)"
+    COMS_TOKEN="$(aws ssm get-parameter \
+      --name "$COMS_TOKEN_PARAM" --region "$AWS_REGION" \
+      --with-decryption --query Parameter.Value --output text)"
 
-    # Provider keys may be unpopulated on first boot; tolerate that so the host
-    # still comes up and registers.
-    PROVIDER_JSON="$(aws secretsmanager get-secret-value \
-      --secret-id "$PROVIDER_KEYS_SECRET_ARN" --region "$AWS_REGION" \
-      --query SecretString --output text 2>/dev/null || echo '{}')"
+    # Provider keys may still be the "{}" placeholder on first boot; tolerate
+    # that so the host still comes up and registers.
+    PROVIDER_JSON="$(aws ssm get-parameter \
+      --name "$PROVIDER_KEYS_PARAM" --region "$AWS_REGION" \
+      --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '{}')"
 
     PROVIDER_EXPORTS="$(echo "$PROVIDER_JSON" | python3 -c \
       'import json,sys,shlex
@@ -161,10 +190,40 @@ ENV_FILE="$AGENT_HOME/.coms-env"
   echo "export PI_COMS_NET_AUTH_TOKEN='$COMS_TOKEN'"
   if [ -n "${AWS_REGION:-}" ]; then echo "export AWS_REGION='$AWS_REGION'"; fi
   if [ -n "${AWS_ACCOUNT_ID:-}" ]; then echo "export AWS_ACCOUNT_ID='$AWS_ACCOUNT_ID'"; fi
+  # Monitor identity follows the agent name, so friendly names (e.g.
+  # eu-oit-dev) keep the pair aligned: monitor-<agent> investigates <agent>.
+  # With the default aws-<account_id> name this matches the old derivation.
+  echo "export PI_MONITOR_NAME='monitor-$AGENT_NAME'"
+  echo "export PI_MONITOR_INVESTIGATE_TARGET='$AGENT_NAME'"
+  # Route the whole piagent workload (agent, monitor, aws CLI) through the
+  # account's DevOpsAgentReadOnly when configured; the ini profile below
+  # chains from the instance role with auto-refresh.
+  if [ -n "${READONLY_ROLE_ARN:-}" ]; then echo "export AWS_PROFILE='devops-readonly'"; fi
   if [ -n "$PROVIDER_EXPORTS" ]; then echo "$PROVIDER_EXPORTS"; fi
 } > "$ENV_FILE"
 chown "$AGENT_USER:$AGENT_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
+
+# ── DevOpsAgentReadOnly profile ────────────────────────────────────────────
+# The assumed-role session is where all investigation reads (and, in Bedrock
+# deployments, model calls) run; CloudTrail attributes them to the role,
+# distinct from instance-role host plumbing.
+if [ -n "${READONLY_ROLE_ARN:-}" ]; then
+  : "${READONLY_EXTERNAL_ID:?READONLY_EXTERNAL_ID required with READONLY_ROLE_ARN}"
+  install -d -m 700 -o "$AGENT_USER" -g "$AGENT_USER" "$AGENT_HOME/.aws"
+  cat > "$AGENT_HOME/.aws/config" <<AWSCFG
+[default]
+region = ${AWS_REGION:-us-east-1}
+
+[profile devops-readonly]
+role_arn = $READONLY_ROLE_ARN
+credential_source = Ec2InstanceMetadata
+external_id = $READONLY_EXTERNAL_ID
+region = ${AWS_REGION:-us-east-1}
+AWSCFG
+  chown "$AGENT_USER:$AGENT_USER" "$AGENT_HOME/.aws/config"
+  chmod 600 "$AGENT_HOME/.aws/config"
+fi
 
 # ── SSH access for `herdr --remote` ────────────────────────────────────────
 SSH_PUBKEY="${SSH_PUBLIC_KEY:-}"
@@ -329,10 +388,18 @@ echo "root pane: $PANE_ID"
 # failure -- even though Pi started and registered within seconds. Keep the
 # timeout short and treat the failure as non-fatal; the hub registry below is
 # the real readiness signal.
+# Optional explicit provider (e.g. amazon-bedrock, which authenticates via
+# the instance role -- no API keys).
+PROVIDER_ARGS=()
+if [ -n "PI_PROVIDER_PLACEHOLDER" ]; then
+  PROVIDER_ARGS=(--provider "PI_PROVIDER_PLACEHOLDER")
+fi
+
 herdr agent start "AGENT_NAME_PLACEHOLDER" --kind pi --pane "$PANE_ID" --timeout 15000 -- \
   -e extensions/coms-net.ts \
   -e extensions/minimal.ts \
   --model "PI_MODEL_PLACEHOLDER" \
+  "${PROVIDER_ARGS[@]}" \
   --cname "AGENT_NAME_PLACEHOLDER" \
   --project "COMS_PROJECT_PLACEHOLDER" \
   --purpose "AGENT_PURPOSE_PLACEHOLDER" || echo "herdr agent start reported failure; verifying against the hub"
@@ -354,12 +421,35 @@ LAUNCH
 sed -i \
   -e "s|AGENT_NAME_PLACEHOLDER|$AGENT_NAME|g" \
   -e "s|PI_MODEL_PLACEHOLDER|$PI_MODEL|g" \
+  -e "s|PI_PROVIDER_PLACEHOLDER|$PI_PROVIDER|g" \
   -e "s|COMS_PROJECT_PLACEHOLDER|$COMS_PROJECT|g" \
   -e "s|AGENT_PURPOSE_PLACEHOLDER|$AGENT_PURPOSE|g" \
   "$AGENT_HOME/bin/start-pi-agent.sh"
 
 chown "$AGENT_USER:$AGENT_USER" "$AGENT_HOME/bin/start-pi-agent.sh"
 chmod 755 "$AGENT_HOME/bin/start-pi-agent.sh"
+
+# ── Convergence script (S3 bundle mode only) ──────────────────────────────
+# Run by an SSM State Manager association (or ad hoc via Run Command): pull
+# the version file, and when it changed, re-run this bootstrap to swap the
+# bundle and restart the services. Root-owned; SSM runs commands as root.
+if [ -n "$BUNDLE_S3_URI" ]; then
+  cat > /usr/local/bin/pi-coms-update <<UPDATE
+#!/usr/bin/env bash
+set -euo pipefail
+CURRENT="\$(cat '$AGENT_HOME/pi-coms/.bundle-version' 2>/dev/null || echo none)"
+LATEST="\$(aws s3 cp '$BUNDLE_S3_URI/version' - --region '$AWS_REGION' 2>/dev/null || echo unknown)"
+if [ "\$CURRENT" = "\$LATEST" ] && [ "\$LATEST" != "unknown" ]; then
+  echo "pi-coms up to date (\$CURRENT)"
+  exit 0
+fi
+echo "updating pi-coms: \$CURRENT -> \$LATEST"
+# The userdata shim owns the env contract; re-running it re-fetches the
+# bundle (including this bootstrap) and restarts the services.
+bash /var/lib/cloud/instance/user-data.txt
+UPDATE
+  chmod 755 /usr/local/bin/pi-coms-update
+fi
 
 systemctl daemon-reload
 systemctl enable --now herdr.service

@@ -8,3 +8,9 @@ node_modules/
 
 .pi/agent-sessions/
 tmp/
+
+# Terraform: providers, state, and per-account variable files stay local
+**/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars

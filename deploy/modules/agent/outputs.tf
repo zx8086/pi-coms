@@ -16,13 +16,18 @@ output "agent_instance_id" {
 }
 
 output "agent_role_arn" {
-  description = "IAM role the agent runs with. Widen this to grant more than ViewOnlyAccess."
+  description = "Instance role of the agent host (host plumbing in readonly mode)."
   value       = aws_iam_role.agent.arn
 }
 
-output "provider_keys_secret_name" {
-  description = "Populate this secret with model provider API keys, then reboot the instance."
-  value       = aws_secretsmanager_secret.provider_keys.name
+output "devops_readonly_role_arn" {
+  description = "DevOpsAgentReadOnly role the workload assumes for AWS reads (empty when readonly_role = false)."
+  value       = var.readonly_role ? aws_iam_role.devops_readonly[0].arn : ""
+}
+
+output "provider_keys_parameter_name" {
+  description = "Populate this SecureString parameter with model provider API keys (aws ssm put-parameter --overwrite), then re-run the bootstrap or reboot."
+  value       = aws_ssm_parameter.provider_keys.name
 }
 
 output "attach_to_agent" {
