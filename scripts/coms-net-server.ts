@@ -173,6 +173,7 @@ export type ComsMessage = {
 	response_schema: object | null;
 	hops: number;
 	status: MessageStatus;
+	mailbox: boolean; // requested TTL beyond the default: retained as inbox history until expiry
 	response?: any;
 	error?: string | null;
 	created_at: string;
@@ -403,6 +404,7 @@ export class MailStore {
 			response_schema TEXT,
 			hops INTEGER NOT NULL DEFAULT 0,
 			status TEXT NOT NULL,
+			mailbox INTEGER NOT NULL DEFAULT 0,
 			response TEXT,
 			error TEXT,
 			created_at TEXT NOT NULL,
@@ -410,12 +412,17 @@ export class MailStore {
 			completed_at TEXT,
 			expires_at TEXT NOT NULL
 		)`);
+		// Migration for databases created before the inbox feature.
+		const cols = this.db.query("PRAGMA table_info(messages)").all() as { name: string }[];
+		if (!cols.some((c) => c.name === "mailbox")) {
+			this.db.exec("ALTER TABLE messages ADD COLUMN mailbox INTEGER NOT NULL DEFAULT 0");
+		}
 	}
 	upsert(m: ComsMessage): void {
 		this.db.query(`INSERT INTO messages (msg_id, project, sender_session, sender_name, sender_cwd,
-			target_session, target_name, prompt, conversation_id, response_schema, hops, status,
+			target_session, target_name, prompt, conversation_id, response_schema, hops, status, mailbox,
 			response, error, created_at, delivered_at, completed_at, expires_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(msg_id) DO UPDATE SET target_session=excluded.target_session,
 			target_name=excluded.target_name, status=excluded.status, response=excluded.response,
 			error=excluded.error, delivered_at=excluded.delivered_at,
@@ -423,6 +430,7 @@ export class MailStore {
 			m.msg_id, m.project, m.sender_session, m.sender_name, m.sender_cwd,
 			m.target_session, m.target_name, m.prompt, m.conversation_id,
 			m.response_schema ? JSON.stringify(m.response_schema) : null, m.hops, m.status,
+			m.mailbox ? 1 : 0,
 			m.response == null ? null : JSON.stringify(m.response), m.error ?? null,
 			m.created_at, m.delivered_at ?? null, m.completed_at ?? null, m.expires_at,
 		);
@@ -447,6 +455,7 @@ export class MailStore {
 			response_schema: r.response_schema ? JSON.parse(r.response_schema) : null,
 			hops: r.hops,
 			status: r.status as MessageStatus,
+			mailbox: r.mailbox === 1,
 			response: r.response == null ? null : JSON.parse(r.response),
 			error: r.error,
 			created_at: r.created_at,
@@ -455,6 +464,47 @@ export class MailStore {
 			expires_at: r.expires_at,
 		}));
 	}
+	// The durable inbox: mailbox-class messages addressed to a name, ascending
+	// by msg_id (ULIDs sort by creation time). Without `since`, the newest
+	// `limit` messages; with it, only newer ones.
+	inbox(
+		targetName: string,
+		limit: number,
+		since?: string,
+	): {
+		msg_id: string;
+		sender_name: string;
+		target_name: string | null;
+		prompt: string;
+		status: string;
+		error: string | null;
+		created_at: string;
+		delivered_at: string | null;
+		completed_at: string | null;
+	}[] {
+		const cols =
+			"msg_id, sender_name, target_name, prompt, status, error, created_at, delivered_at, completed_at";
+		if (since) {
+			return this.db.query(
+				`SELECT ${cols} FROM messages WHERE mailbox = 1 AND target_name = ? AND msg_id > ?
+				ORDER BY msg_id ASC LIMIT ?`,
+			).all(targetName, since, limit) as any[];
+		}
+		return this.db.query(
+			`SELECT * FROM (SELECT ${cols} FROM messages WHERE mailbox = 1 AND target_name = ?
+			ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC`,
+		).all(targetName, limit) as any[];
+	}
+
+	// Retention horizon for the inbox: terminal mailbox rows live until their
+	// expiry. Non-terminal rows belong to the live sweep, which marks them
+	// expired in memory first.
+	purgeExpired(): void {
+		this.db.query(
+			"DELETE FROM messages WHERE mailbox = 1 AND status IN ('complete','error','timeout') AND expires_at < ?",
+		).run(new Date().toISOString());
+	}
+
 	close(): void {
 		try {
 			this.db.close();
@@ -1060,6 +1110,7 @@ async function handleSendMessage(req: Request): Promise<Response> {
 								: null,
 						hops,
 						status: "queued",
+						mailbox: isMailbox,
 						response: null,
 						error: null,
 						created_at: nowIso(),
@@ -1124,6 +1175,7 @@ async function handleSendMessage(req: Request): Promise<Response> {
 				: null,
 		hops,
 		status: "queued",
+		mailbox: isMailbox,
 		response: null,
 		error: null,
 		created_at: created,
@@ -1180,6 +1232,20 @@ async function handleSendMessage(req: Request): Promise<Response> {
 		target_session: target.session_id,
 	};
 	return json(resp);
+}
+
+// The durable inbox: read-many, non-destructive, so every operator sees the
+// same messages on demand. Reads sqlite directly -- retained terminal rows are
+// no longer in the in-memory map.
+function handleInbox(_req: Request, url: URL): Response {
+	const projectName = url.searchParams.get("project") ?? "default";
+	const name = (url.searchParams.get("name") ?? "").trim();
+	if (!name) return errorJson("missing_name", 400);
+	const requested = Number(url.searchParams.get("limit") ?? 20);
+	const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 100) : 20;
+	const since = url.searchParams.get("since") ?? undefined;
+	const messages = mailFor(projectName).inbox(name, limit, since);
+	return json({ ok: true, name, messages });
 }
 
 function handleGetMessage(_req: Request, msg_id: string): Response {
@@ -1486,6 +1552,11 @@ async function router(req: Request): Promise<Response> {
 		return handleSendMessage(req);
 	}
 
+	// 7. GET /v1/mailbox (durable inbox, read-many)
+	if (pathname === "/v1/mailbox" && method === "GET") {
+		return handleInbox(req, url);
+	}
+
 	// /v1/agents/:session_id/heartbeat (POST) and DELETE /v1/agents/:session_id
 	const agentMatch = pathname.match(
 		/^\/v1\/agents\/([^/]+)(?:\/(heartbeat))?$/,
@@ -1609,7 +1680,8 @@ function ttlScanTick(): void {
 					now - completedAt > MESSAGE_TTL_MS
 				) {
 					p.messages.delete(id);
-					mailFor(projectName).remove(id);
+					// Mailbox rows stay on disk as inbox history until expiry.
+					if (!m.mailbox) mailFor(projectName).remove(id);
 				}
 			} else if (m.status === "timeout") {
 				if (Number.isFinite(expires) && now > expires) {
@@ -1618,6 +1690,7 @@ function ttlScanTick(): void {
 				}
 			}
 		}
+		mailFor(projectName).purgeExpired();
 	}
 }
 

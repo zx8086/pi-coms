@@ -1372,6 +1372,58 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		name: "coms_net_inbox",
+		label: "Coms Net Inbox",
+		description:
+			"Read a durable inbox: long-TTL mailbox messages (e.g. monitor reports) are retained on the hub until their TTL expires and stay readable by everyone. " +
+			"Non-destructive and identical for every reader, so any operator connecting at any time sees the same messages on demand. " +
+			"Defaults to your own registered name; pass name to read a shared inbox like \"ops\". " +
+			"Use since with a msg_id to fetch only newer messages.",
+		parameters: Type.Object({
+			name: Type.Optional(Type.String({ description: "Inbox name to read (default: your own registered name)." })),
+			limit: Type.Optional(Type.Number({ description: "Maximum messages to return (default 10, server cap 100)." })),
+			since: Type.Optional(Type.String({ description: "Only messages newer than this msg_id (ascending)." })),
+		}),
+		async execute(_callId, params) {
+			if (!identity) throw new Error("coms-net not initialised");
+			const name = ((params as any).name as string | undefined) || identity.name;
+			const limit = typeof (params as any).limit === "number" && (params as any).limit > 0 ? (params as any).limit : 10;
+			const since = (params as any).since as string | undefined;
+			const qs =
+				`?project=${encodeURIComponent(identity.project)}&name=${encodeURIComponent(name)}&limit=${limit}` +
+				(since ? `&since=${encodeURIComponent(since)}` : "");
+			const resp = await httpFetch("GET", `/v1/mailbox${qs}`);
+			const messages: any[] = Array.isArray(resp?.messages) ? resp.messages : [];
+			const lines = messages.length === 0
+				? `Inbox "${name}" is empty.`
+				: messages.map((m) => {
+					const body: string = typeof m.prompt === "string" ? m.prompt : "";
+					const preview = body.slice(0, 400).replace(/\n/g, "\n  ");
+					const cut = body.length > 400 ? " …" : "";
+					return `[${m.created_at}] from ${m.sender_name} (${m.status}) msg_id ${m.msg_id}\n  ${preview}${cut}`;
+				}).join("\n\n");
+			return {
+				content: [{ type: "text" as const, text: `Inbox "${name}": ${messages.length} message(s)\n\n${lines}` }],
+				details: { name, count: messages.length, messages },
+			};
+		},
+		renderCall(args, theme) {
+			const n = (args as any).name;
+			return new Text(
+				theme.fg("toolTitle", theme.bold("coms_net_inbox")) + theme.fg("dim", n ? ` ${n}` : ""),
+				0, 0,
+			);
+		},
+		renderResult(result, _options, theme) {
+			const d = result.details as any;
+			return new Text(
+				theme.fg("accent", `${d?.count ?? "?"} message(s)`) + theme.fg("dim", ` in ${d?.name ?? "inbox"}`),
+				0, 0,
+			);
+		},
+	});
+
+	pi.registerTool({
 		name: "coms_net_await",
 		label: "Coms Net Await",
 		description:

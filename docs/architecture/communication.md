@@ -11,6 +11,7 @@ The message model shared by both transports: how a prompt travels, how replies c
 | `coms_net_get` | `msg_id` | Non-blocking status poll: `pending`, `complete`, `error`, `timeout` |
 | `coms_net_await` | `msg_id`, `timeout_ms?` | Block until the reply lands or the timeout fires |
 | `coms_net_broadcast` | `prompt`, `targets?`, `timeout_ms?` | Fan out to all (or selected) peers; replies gathered in parallel |
+| `coms_net_inbox` | `name?`, `limit?`, `since?` | Read a durable inbox non-destructively: retained mailbox messages, identical for every reader (see [Monitoring](monitoring.md#the-durable-inbox-read-many-on-demand)) |
 
 `coms_net_broadcast` exists only on the networked transport. `target` is a peer name in the caller's project, or a session id. When a name maps to more than one live session, the hub rejects the send with `ambiguous_target` rather than guessing.
 

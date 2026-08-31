@@ -24,6 +24,7 @@ function msg(over: Partial<ComsMessage> = {}): ComsMessage {
 		response_schema: null,
 		hops: 0,
 		status: "queued",
+		mailbox: true,
 		response: null,
 		error: null,
 		created_at: new Date().toISOString(),

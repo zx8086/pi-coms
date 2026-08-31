@@ -44,6 +44,10 @@ A name-queued message is claimed by the next session that registers under that n
 
 When a session's SSE stream opens, the hub -- after `hello` and `pool_snapshot` -- claims any name-addressed mail for that session and flushes its queued messages oldest-first as ordinary `prompt` events. The client needs no changes to receive them: each flushed prompt triggers a normal follow-up turn, in queue order. The prompt's sender identity comes from values stored at send time, so it renders correctly even if the sender is long gone.
 
+### The durable inbox: read-many, on demand
+
+Mailbox-class messages double as history. A terminal (delivered and answered, or expired-in-queue) mailbox message is retained in `messages.db` until its TTL expires, and `GET /v1/mailbox?name=<name>&limit=&since=<msg_id>` reads it back non-destructively — every operator sees the same list whenever they connect, with `since` as a stateless cursor (ULID ids sort by time). The client tool is `coms_net_inbox` (defaults to your own name; pass a shared name like `ops`). Short-TTL interactive messages never enter the inbox. Push is unchanged: a session registering as the target name still gets flush-on-connect.
+
 ### Restart recovery
 
 On boot the hub reloads all non-terminal messages from every project's `messages.db`. Delivered-but-unanswered mail is re-queued by name (at-least-once delivery: a peer that answered just as the hub died may see the prompt again). A new `server_id`, same mail. The hub container mounts a named volume (`coms-hub-mail` -> `/home/bun/.pi/coms-net`) so mail also survives container recreation.
