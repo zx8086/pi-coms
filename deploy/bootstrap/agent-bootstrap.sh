@@ -155,6 +155,14 @@ else
 fi
 sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/bun install"
 
+# Spoke operating instructions: Pi loads AGENTS.override.md from cwd ahead of
+# CLAUDE.md, so the agent gets its operating context instead of the repo's
+# developer instructions. Host-only copy; operator checkouts are untouched.
+if [ -f "$AGENT_HOME/pi-coms/deploy/AGENTS-spoke.md" ]; then
+  cp "$AGENT_HOME/pi-coms/deploy/AGENTS-spoke.md" "$AGENT_HOME/pi-coms/AGENTS.override.md"
+  chown "$AGENT_USER:$AGENT_USER" "$AGENT_HOME/pi-coms/AGENTS.override.md"
+fi
+
 # ── Secrets ────────────────────────────────────────────────────────────────
 # Resolved into a 0600 env file the agent sources. Values are never echoed.
 
