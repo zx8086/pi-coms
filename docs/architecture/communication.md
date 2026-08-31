@@ -38,7 +38,7 @@ Messages expire 30 minutes after creation by default (`PI_COMS_NET_MESSAGE_TTL_M
 
 ### Mailbox: durable sends to offline peers
 
-A send whose `ttl_ms` exceeds the default is a **mailbox send**. If the target name has no live session, the hub does not return `target_not_found`; it queues the message by name (`200 {status: "queued", target_session: null}`) and persists it in sqlite. The next session registering under that name receives all its queued mail oldest-first as ordinary `prompt` events, right after `hello` and `pool_snapshot` on its SSE stream. Queued mail survives hub restarts and container recreation. Short-TTL interactive sends keep the fail-fast behavior exactly as before.
+A send whose `ttl_ms` exceeds the default is a **mailbox send**. If the target name has no live session, the hub does not return `target_not_found`; it queues the message by name (`200 {status: "queued", target_session: null}`) and persists it in sqlite. The next session registering under that name receives all its queued mail oldest-first as `prompt` events flagged `mailbox: true`, right after `hello` and `pool_snapshot` on its SSE stream. Mailbox-flagged prompts never trigger a turn on the recipient: the extension shows a passive notice and the content is read on demand with `coms_net_inbox` (the hub inbox retains it until TTL expiry). Only interactive short-TTL sends trigger turns and auto-replies. Queued mail survives hub restarts and container recreation. Short-TTL interactive sends keep the fail-fast behavior exactly as before.
 
 This is how monitor reports reach an operator whose laptop was offline at check time. Full mechanics in [Monitoring](monitoring.md#the-hub-mailbox).
 

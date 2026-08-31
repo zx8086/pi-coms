@@ -787,6 +787,7 @@ function flushQueuedMail(p: ProjectState, projectName: string, sessionId: string
 			conversation_id: m.conversation_id,
 			response_schema: m.response_schema,
 			hops: m.hops,
+			mailbox: m.mailbox,
 		});
 		m.status = "delivered";
 		m.delivered_at = nowIso();
@@ -1390,6 +1391,7 @@ async function handleSendMessage(req: Request): Promise<Response> {
 			conversation_id: msg.conversation_id,
 			response_schema: msg.response_schema,
 			hops: msg.hops,
+			mailbox: msg.mailbox,
 		});
 		msg.status = "delivered";
 		msg.delivered_at = nowIso();

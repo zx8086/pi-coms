@@ -666,6 +666,35 @@ export default function (pi: ExtensionAPI) {
 		const hops = typeof data.hops === "number" ? data.hops : 0;
 		const responseSchema = (data.response_schema && typeof data.response_schema === "object") ? data.response_schema : null;
 
+		// Mail is not conversation: mailbox-class messages (monitor reports,
+		// anything sent with a long ttl_ms) must never trigger an unrequested
+		// turn on the recipient. Show a passive notice; the content stays in the
+		// hub's durable inbox for on-demand reads via coms_net_inbox.
+		if (data.mailbox === true) {
+			try {
+				pi.sendMessage(
+					{
+						customType: "coms-net-mail-notice",
+						content:
+							`[coms-net mail] new inbox message from ${senderName} (msg_id ${msg_id}). ` +
+							`Not delivered to the model; read it on request with coms_net_inbox.`,
+						display: true,
+						details: { msg_id, sender_session: senderSession },
+					},
+					{ deliverAs: "followUp", triggerTurn: false },
+				);
+			} catch { /* notice is best-effort */ }
+			try {
+				pi.appendEntry("coms-net-log", {
+					event: "mail_in",
+					ts: nowIso(),
+					msg_id,
+					sender: senderSession,
+				});
+			} catch { /* best-effort */ }
+			return;
+		}
+
 		const inbound: InboundContext = {
 			msg_id,
 			hops,
