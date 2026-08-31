@@ -364,9 +364,14 @@ data "aws_ssm_parameter" "al2023_arm64" {
 }
 
 resource "aws_instance" "agent" {
-  ami                         = data.aws_ssm_parameter.al2023_arm64.value
-  instance_type               = var.instance_type
-  subnet_id                   = data.aws_subnet.chosen.id
+  ami           = data.aws_ssm_parameter.al2023_arm64.value
+  instance_type = var.instance_type
+  subnet_id     = data.aws_subnet.chosen.id
+  # ami is ForceNew and the data source tracks the latest release; without
+  # this a routine apply can rebuild the host unplanned (observed 2026-08-31).
+  lifecycle {
+    ignore_changes = [ami]
+  }
   vpc_security_group_ids      = [aws_security_group.agent.id]
   iam_instance_profile        = aws_iam_instance_profile.agent.name
   associate_public_ip_address = var.associate_public_ip

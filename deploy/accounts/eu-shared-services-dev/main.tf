@@ -149,6 +149,7 @@ module "hub" {
 
   coms_auth_token = var.coms_auth_token
   subnet_id       = var.hub_subnet_id
+  private_ip      = "10.34.89.51" # pinned: OIT and operator configs reference this address
   allowed_cidrs   = var.allowed_cidrs
   repo_url        = var.repo_url
   bundle_s3_uri   = local.bundle_s3_uri
