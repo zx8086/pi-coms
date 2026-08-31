@@ -128,8 +128,23 @@ export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
 PROFILE
 BOOTSTRAP
 
-# ── Project checkout ───────────────────────────────────────────────────────
+# ── AWS credentials wait ───────────────────────────────────────────────────
+# On a cold boot the instance-profile credentials can lag IMDS by a few
+# seconds; the first credentialed call then fails and aborts the whole
+# bootstrap (observed on an OIT boot, 2026-08-31). Wait for the credential
+# chain before any aws call. sts:GetCallerIdentity needs no IAM grant.
 BUNDLE_S3_URI="${BUNDLE_S3_URI:-}"
+if [ -n "$BUNDLE_S3_URI" ] || [ "$SECRETS_SOURCE" = "aws" ]; then
+  command -v aws >/dev/null || { echo "aws cli not found" >&2; exit 1; }
+  for i in $(seq 1 10); do
+    aws sts get-caller-identity --region "${AWS_REGION:-us-east-1}" \
+      --query Account --output text >/dev/null 2>&1 && { echo "aws credentials ready after $i attempt(s)"; break; }
+    [ "$i" -eq 10 ] && { echo "aws credentials unavailable after $i attempts (sts get-caller-identity kept failing)" >&2; exit 1; }
+    sleep 3
+  done
+fi
+
+# ── Project checkout ───────────────────────────────────────────────────────
 if [ -n "$BUNDLE_S3_URI" ]; then
   # AWS-native path: the S3 fleet bundle is the source of truth; the host
   # never talks to GitHub. Vendored node_modules ride in the bundle.
