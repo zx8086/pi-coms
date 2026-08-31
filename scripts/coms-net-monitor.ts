@@ -228,8 +228,14 @@ function main(): void {
 		}
 	};
 
-	const guard = makeGuard();
-	const runChecksNow = () => guard(async () => void (await runCycle(fifteenDeps)));
+	// Two guards, deliberately separate: @daily fires at midnight, which is
+	// always also a */15 boundary. A single shared guard makes the collision a
+	// silent skip -- whichever job wins the race suppresses the other, and the
+	// digest never ships. Each guard still serializes its own job against the
+	// run-checks command.
+	const checkGuard = makeGuard();
+	const dailyGuard = makeGuard();
+	const runChecksNow = () => checkGuard(async () => void (await runCycle(fifteenDeps)));
 
 	handleCommand = async (prompt: string): Promise<string> => {
 		const cmd = prompt.trim().toLowerCase();
@@ -256,7 +262,7 @@ function main(): void {
 		await coms.start();
 		log(`registered as ${coms.name}; checks ${CHECK_CRON}; daily ${DAILY_CRON}; reporting to ${REPORT_TO}`);
 		Bun.cron(CHECK_CRON, () => runChecksNow());
-		Bun.cron(DAILY_CRON, () => guard(dailyDigest));
+		Bun.cron(DAILY_CRON, () => dailyGuard(dailyDigest));
 	})();
 
 	const shutdown = () => {

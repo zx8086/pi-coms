@@ -107,6 +107,23 @@ describe("runCycle", () => {
 });
 
 describe("makeGuard", () => {
+	test("separate guards never starve each other (midnight collision)", async () => {
+		// @daily always coincides with a */15 boundary; the check and daily jobs
+		// must therefore hold DIFFERENT guards or the digest is silently skipped.
+		const checkGuard = makeGuard();
+		const dailyGuard = makeGuard();
+		let dailyRan = false;
+		await Promise.all([
+			checkGuard(async () => {
+				await Bun.sleep(50);
+			}),
+			dailyGuard(async () => {
+				dailyRan = true;
+			}),
+		]);
+		expect(dailyRan).toBe(true);
+	});
+
 	test("overlapping invocations are skipped, not queued", async () => {
 		const guard = makeGuard();
 		let running = 0;
