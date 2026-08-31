@@ -241,6 +241,52 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
         Action   = ["ce:GetCostAndUsage"]
         Resource = "*"
       }],
+      // Scheduling and history reads the vendored prod policies lack (SIO-1583).
+      // Upstream candidates alongside CE and Bedrock.
+      [{
+        Sid    = "SchedulingAndHistoryReads"
+        Effect = "Allow"
+        Action = [
+          "scheduler:ListSchedules",
+          "scheduler:GetSchedule",
+          "scheduler:ListScheduleGroups",
+          "scheduler:ListTagsForResource",
+          "cloudwatch:DescribeAlarmHistory",
+          "autoscaling:DescribeScheduledActions",
+          "application-autoscaling:DescribeScheduledActions",
+          "rds:ListTagsForResource",
+          "events:ListRuleNamesByTarget",
+          "ssm:DescribeMaintenanceWindows",
+          "ssm:DescribeMaintenanceWindowTargets",
+          "compute-optimizer:GetECSServiceRecommendations",
+          "compute-optimizer:GetEC2InstanceRecommendations",
+        ]
+        Resource = "*"
+      }],
+      // Metadata-only made structural: an explicit Deny on secret values,
+      // decryption, data-plane reads, and the presigned code URL. Explicit
+      // deny beats any current or future Allow on this role.
+      // lambda:GetFunctionConfiguration and ecs:DescribeTaskDefinition stay
+      // allowed deliberately (env-var config is core diagnostic input).
+      [{
+        Sid    = "SecretAndDataPlaneDeny"
+        Effect = "Deny"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "kms:Decrypt",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+          "lambda:GetFunction",
+          "s3:GetObject",
+          "dynamodb:GetItem",
+          "dynamodb:BatchGetItem",
+          "dynamodb:Scan",
+          "dynamodb:Query",
+          "sqs:ReceiveMessage",
+        ]
+        Resource = "*"
+      }],
       var.enable_bedrock ? [{
         Sid    = "BedrockInvokeAnthropic"
         Effect = "Allow"
