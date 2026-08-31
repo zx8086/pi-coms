@@ -70,7 +70,7 @@ just coms-net-server-lan
 
 # Terminals 2+ -- clients (auto-discover local server.json)
 just coms --name dev --cname dev
-just coms2 --name prod --cname prod    # pinned to a different model
+just coms --name prod --cname prod --model claude-opus-4-7   # different model
 ```
 
 The agent name flag is `--cname` (Pi owns `--name` and resumes it across sessions); pass both so the session and the coms agent share a name.

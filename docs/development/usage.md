@@ -98,7 +98,7 @@ Identity can also come from `--system-prompt`/`--append-system-prompt` markdown 
 
 ## Models
 
-Always qualify models as `provider/id` -- `--model` matches a pattern, and a bare `gpt-5.4-mini` can fuzzy-match the wrong provider and fail with "No API key for provider". The `just` recipes `coms1` through `coms4` pin specific models for quick side-by-side peers.
+Always qualify models as `provider/id` -- `--model` matches a pattern, and a bare `gpt-5.4-mini` can fuzzy-match the wrong provider and fail with "No API key for provider". Pass `--model` through `just coms` to pin one per peer.
 
 ## Environment variables
 
