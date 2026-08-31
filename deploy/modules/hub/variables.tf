@@ -62,3 +62,9 @@ variable "associate_public_ip" {
   type        = bool
   default     = false
 }
+
+variable "private_ip" {
+  description = "Fixed private IP for the hub ENI. Spokes pin the hub URL by IP, so the address must survive instance replacement."
+  type        = string
+  default     = null
+}

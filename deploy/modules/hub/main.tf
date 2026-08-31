@@ -120,9 +120,17 @@ data "aws_ssm_parameter" "al2023_arm64" {
 }
 
 resource "aws_instance" "hub" {
-  ami                         = data.aws_ssm_parameter.al2023_arm64.value
-  instance_type               = var.instance_type
-  subnet_id                   = data.aws_subnet.chosen.id
+  ami           = data.aws_ssm_parameter.al2023_arm64.value
+  instance_type = var.instance_type
+  subnet_id     = data.aws_subnet.chosen.id
+  private_ip    = var.private_ip
+  # The AMI data source tracks the latest AL2023 release and ami is ForceNew:
+  # without this, a routine apply can silently rebuild the hub (observed
+  # 2026-08-31, which changed the hub IP and cut off every spoke). AMI
+  # updates now happen only via explicit -replace.
+  lifecycle {
+    ignore_changes = [ami]
+  }
   vpc_security_group_ids      = [aws_security_group.hub.id]
   iam_instance_profile        = aws_iam_instance_profile.hub.name
   associate_public_ip_address = var.associate_public_ip
