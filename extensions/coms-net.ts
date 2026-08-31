@@ -708,6 +708,13 @@ export default function (pi: ExtensionAPI) {
 		inboundQueue.set(msg_id, inbound);
 		currentInbound = inbound;
 
+		// The schema must be in the turn content: `details` is metadata the model
+		// never sees, and a schema the recipient cannot read is a contract it can
+		// only guess at (both account agents guessed the same wrong shape).
+		const schemaBlock = responseSchema
+			? `\n\n[the sender expects a JSON reply matching this response schema:]\n${JSON.stringify(responseSchema, null, 2)}`
+			: "";
+
 		try {
 			pi.sendMessage(
 				{
@@ -717,7 +724,7 @@ export default function (pi: ExtensionAPI) {
 						`[reply by writing a normal assistant message — your turn output is auto-returned to ${senderName}. ` +
 						`DO NOT call coms_net_send/coms_net_await/coms_net_get to reply; that creates a ping-pong loop. ` +
 						`msg_id ${msg_id} belongs to ${senderName}'s outbound, not yours.]\n\n` +
-						`${promptText}`,
+						`${promptText}${schemaBlock}`,
 					display: true,
 					details: {
 						msg_id,

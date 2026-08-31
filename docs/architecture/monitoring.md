@@ -125,7 +125,9 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | `PI_MONITOR_CHECK_CRON` | `*/15 * * * *` | Alarm/log/drift cadence |
 | `PI_MONITOR_DAILY_CRON` | `@daily` | Cost check + digest (midnight UTC) |
 | `PI_MONITOR_INVESTIGATE_TARGET` | `aws-<account_id>` | Peer that investigates findings |
-| `PI_MONITOR_INVESTIGATE_TIMEOUT_MS` | `300000` (5 min) | Investigation deadline |
+| `PI_MONITOR_INVESTIGATE_TIMEOUT_MS` | `300000` (5 min) | Investigation deadline base |
+| `PI_MONITOR_INVESTIGATE_PER_FINDING_MS` | `60000` (1 min) | Added to the deadline per finding in the batch |
+| `PI_MONITOR_INVESTIGATE_MAX_MS` | `1800000` (30 min) | Deadline cap regardless of batch size |
 | `PI_MONITOR_COST_PCT` / `PI_MONITOR_COST_ABS` | `20` / `1` | Cost anomaly double threshold |
 | `PI_MONITOR_STATE_DB` | `~/.pi/monitor/state.db` | State location |
 
