@@ -13,7 +13,7 @@ const SERVER = path.join(import.meta.dir, "..", "scripts", "coms-net-server.ts")
 export type Hub = { proc: Bun.Subprocess; url: string; home: string };
 export const activeHubs: Hub[] = [];
 
-export async function startHub(home?: string): Promise<Hub> {
+export async function startHub(home?: string, extraEnv: Record<string, string> = {}): Promise<Hub> {
 	const h = home ?? fs.mkdtempSync(path.join(os.tmpdir(), "hub-home-"));
 	const proc = Bun.spawn(["bun", SERVER], {
 		env: {
@@ -23,6 +23,7 @@ export async function startHub(home?: string): Promise<Hub> {
 			PI_COMS_NET_PORT: "0",
 			PI_COMS_NET_AUTH_TOKEN: TOKEN,
 			PI_COMS_NET_LOG_QUIET: "1",
+			...extraEnv,
 		},
 		stdout: "pipe",
 		stderr: "pipe",
@@ -46,15 +47,26 @@ export async function stopHub(hub: Hub): Promise<void> {
 	if (i >= 0) activeHubs.splice(i, 1);
 }
 
-export async function api(hub: Hub, method: string, p: string, body?: unknown): Promise<Response> {
+export async function api(
+	hub: Hub,
+	method: string,
+	p: string,
+	body?: unknown,
+	token: string = TOKEN,
+): Promise<Response> {
 	return fetch(hub.url + p, {
 		method,
-		headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+		headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 }
 
-export async function register(hub: Hub, session_id: string, name: string): Promise<string> {
+export async function register(
+	hub: Hub,
+	session_id: string,
+	name: string,
+	token: string = TOKEN,
+): Promise<string> {
 	const r = await api(hub, "POST", "/v1/agents/register", {
 		project: "default",
 		session_id,
@@ -64,7 +76,7 @@ export async function register(hub: Hub, session_id: string, name: string): Prom
 		color: "#888888",
 		cwd: "/tmp",
 		explicit: false,
-	});
+	}, token);
 	expect(r.status).toBe(200);
 	return ((await r.json()) as any).sse_url as string;
 }

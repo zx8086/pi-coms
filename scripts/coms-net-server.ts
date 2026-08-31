@@ -44,6 +44,13 @@ const HEARTBEAT_MS = Number(process.env.PI_COMS_NET_HEARTBEAT_MS ?? 10_000);
 const STALE_AFTER_MS = Number(process.env.PI_COMS_NET_STALE_AFTER_MS ?? 30_000);
 const OFFLINE_AFTER_MS = Number(process.env.PI_COMS_NET_OFFLINE_AFTER_MS ?? 60_000);
 
+// Per-principal token directory (SIO-1577). Either source activates directory
+// mode; neither keeps the legacy single shared token exactly as before.
+const AUTH_FILE = process.env.PI_COMS_NET_AUTH_FILE;
+const AUTH_SSM_PATH = process.env.PI_COMS_NET_AUTH_SSM_PATH;
+const AUTH_REFRESH_MS = Number(process.env.PI_COMS_NET_AUTH_REFRESH_MS ?? 60_000);
+const DIRECTORY_MODE = Boolean(AUTH_FILE || AUTH_SSM_PATH);
+
 const STALE_SCAN_INTERVAL_MS = 5_000;
 const TTL_SCAN_INTERVAL_MS = 10_000;
 const SSE_KEEPALIVE_MS = 15_000;
@@ -87,9 +94,10 @@ function logLine(symbol: string, color: string, kind: string, detail: string): v
 const tail6 = (id: string) => id.length > 6 ? id.slice(-6) : id;
 const dim = (s: string) => `${C_DIM}${s}${C_RESET}`;
 
-function logRegister(name: string, project: string, sid: string, isReregister: boolean): void {
+function logRegister(name: string, project: string, sid: string, isReregister: boolean, principal?: string): void {
 	const verb = isReregister ? "re-register" : "register";
-	logLine(isReregister ? "↻" : "✓", C_GREEN, verb, `${name}@${project} ${dim("sid=…" + tail6(sid))}`);
+	const who = principal ? ` ${dim("principal=" + principal)}` : "";
+	logLine(isReregister ? "↻" : "✓", C_GREEN, verb, `${name}@${project} ${dim("sid=…" + tail6(sid))}${who}`);
 }
 function logUnregister(name: string, reason: string): void {
 	logLine("✗", C_RED, "unregister", `${name} ${dim("reason=" + reason)}`);
@@ -158,6 +166,8 @@ export type AgentCard = {
 export type RegistryEntry = AgentCard & {
 	last_seen_at: string;
 	registered_at: string;
+	token_hash?: string; // directory-mode sessions carry their token hash for revocation
+	principal?: string;
 };
 
 export type ComsMessage = {
@@ -308,11 +318,125 @@ export function tokensEqual(a: string, b: string): boolean {
 	return crypto.timingSafeEqual(ab, bb);
 }
 
-function authed(req: Request): boolean {
-	if (!TOKEN) return false;
+// ── Per-principal auth (SIO-1577) ───────────────────────────────────────────
+
+export type AuthPrincipal = { principal: string; kind: string; names: string[] };
+type AuthResult = { principal: AuthPrincipal; token_hash: string | null };
+
+const ROOT_PRINCIPAL: AuthPrincipal = { principal: "root", kind: "root", names: ["*"] };
+const LEGACY_PRINCIPAL: AuthPrincipal = { principal: "shared", kind: "legacy", names: ["*"] };
+
+// sha256 hashes are the only token representation kept in memory long-term.
+let tokenDirectory = new Map<string, AuthPrincipal>();
+
+function sha256hex(s: string): string {
+	return crypto.createHash("sha256").update(s, "utf-8").digest("hex");
+}
+
+// Name patterns: exact, "prefix-*", or "*".
+export function nameAllowed(p: { names: string[] }, name: string): boolean {
+	for (const pat of p.names) {
+		if (pat === "*") return true;
+		if (pat.endsWith("-*")) {
+			if (name.startsWith(pat.slice(0, -1))) return true;
+		} else if (pat === name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function parseDirectoryEntries(principals: Record<string, any> | undefined): Map<string, AuthPrincipal> {
+	const map = new Map<string, AuthPrincipal>();
+	for (const [principal, rec] of Object.entries(principals ?? {})) {
+		if (!rec || typeof rec.token !== "string" || rec.token.length < 16) continue;
+		const names = Array.isArray(rec.names)
+			? rec.names.filter((n: unknown): n is string => typeof n === "string")
+			: [];
+		map.set(sha256hex(rec.token), {
+			principal,
+			kind: typeof rec.kind === "string" ? rec.kind : "operator",
+			names,
+		});
+	}
+	return map;
+}
+
+async function refreshTokenDirectory(): Promise<void> {
+	if (!DIRECTORY_MODE) return;
+	let next: Map<string, AuthPrincipal> | null = null;
+	try {
+		if (AUTH_FILE) {
+			const parsed = JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
+			next = parseDirectoryEntries(parsed.principals);
+		} else if (AUTH_SSM_PATH) {
+			// The hub stays Bun-stdlib-only; SSM access rides the host's aws CLI.
+			const proc = Bun.spawn(
+				["aws", "ssm", "get-parameters-by-path", "--path", AUTH_SSM_PATH,
+					"--with-decryption", "--recursive", "--output", "json"],
+				{ stdout: "pipe", stderr: "pipe" },
+			);
+			const out = await new Response(proc.stdout).text();
+			await proc.exited;
+			if (proc.exitCode !== 0) throw new Error(`aws ssm exited ${proc.exitCode}`);
+			const parsed = JSON.parse(out);
+			const principals: Record<string, any> = {};
+			for (const p of parsed.Parameters ?? []) {
+				const name = String(p.Name ?? "").split("/").pop() ?? "";
+				if (!name) continue;
+				try {
+					principals[name] = JSON.parse(p.Value);
+				} catch {
+					// malformed entry: skip, never fail the whole refresh
+				}
+			}
+			next = parseDirectoryEntries(principals);
+		}
+	} catch (err: any) {
+		// Keep the previous directory on refresh failure: a transient SSM or
+		// file error must not lock the whole fleet out.
+		logRejected("auth_refresh_failed", String(err?.message ?? err));
+		return;
+	}
+	if (!next) return;
+	const prev = tokenDirectory;
+	tokenDirectory = next;
+
+	// Revocation: sessions registered with a hash that vanished are evicted.
+	for (const [projectName, p] of state.projects) {
+		for (const [sid, entry] of [...p.agents]) {
+			const th = entry.token_hash;
+			if (!th) continue; // root/legacy sessions are not directory-managed
+			if (prev.has(th) && !tokenDirectory.has(th)) {
+				const w = p.streams.get(sid);
+				if (w) {
+					try { w.close(); } catch { /* noop */ }
+					p.streams.delete(sid);
+				}
+				p.agents.delete(sid);
+				nameIndexRemove(p, entry.name, sid);
+				logUnregister(entry.name, "revoked");
+				broadcast(p, "agent_left", {
+					project: projectName, session_id: sid, name: entry.name, reason: "revoked",
+				}, sid);
+			}
+		}
+	}
+}
+
+function authenticate(req: Request): AuthResult | null {
 	const h = req.headers.get("authorization") ?? "";
-	if (!h.startsWith("Bearer ")) return false;
-	return tokensEqual(h.slice(7), TOKEN);
+	if (!h.startsWith("Bearer ")) return null;
+	const presented = h.slice(7);
+	if (DIRECTORY_MODE) {
+		const hash = sha256hex(presented);
+		const hit = tokenDirectory.get(hash);
+		if (hit) return { principal: hit, token_hash: hash };
+		if (TOKEN && tokensEqual(presented, TOKEN)) return { principal: ROOT_PRINCIPAL, token_hash: null };
+		return null;
+	}
+	if (!TOKEN) return null;
+	return tokensEqual(presented, TOKEN) ? { principal: LEGACY_PRINCIPAL, token_hash: null } : null;
 }
 
 export function json(body: unknown, status = 200): Response {
@@ -734,7 +858,7 @@ async function handleHealth(_req: Request): Promise<Response> {
 	});
 }
 
-async function handleRegister(req: Request): Promise<Response> {
+async function handleRegister(req: Request, auth: AuthResult | null): Promise<Response> {
 	let body: RegisterRequest;
 	try {
 		body = (await req.json()) as RegisterRequest;
@@ -750,20 +874,40 @@ async function handleRegister(req: Request): Promise<Response> {
 	) {
 		return errorJson("invalid_request", 400);
 	}
+	const principal = auth?.principal ?? LEGACY_PRINCIPAL;
 	const projectName = body.project || "default";
 	const p = getOrCreateProject(projectName);
 	const desiredName = body.name && body.name.length > 0 ? body.name : "agent";
+
+	// Directory mode: a principal may only register names on its list, and a
+	// name held by another live session is a conflict, never auto-suffixed --
+	// silently becoming "ops2" would defeat the binding.
+	const strictNames = DIRECTORY_MODE && !principal.names.includes("*");
+	if (strictNames && !nameAllowed(principal, desiredName)) {
+		logRejected("name_not_allowed", `${principal.principal} → "${desiredName}"`);
+		return errorJson("name_not_allowed", 403, { name: desiredName, principal: principal.principal });
+	}
+
 	let resolvedName = desiredName;
 	const existing = p.agents.get(body.session_id);
 	const isReregister = !!existing;
 	if (existing) {
 		// upsert: keep their existing name unless they ask for a different one
-		resolvedName =
-			body.name && body.name !== existing.name
-				? resolveUniqueName(p, desiredName)
-				: existing.name;
+		if (body.name && body.name !== existing.name) {
+			resolvedName = resolveUniqueName(p, desiredName);
+			if (strictNames && resolvedName !== desiredName) {
+				logRejected("name_taken", `${principal.principal} → "${desiredName}"`);
+				return errorJson("name_taken", 409, { name: desiredName });
+			}
+		} else {
+			resolvedName = existing.name;
+		}
 	} else {
 		resolvedName = resolveUniqueName(p, desiredName);
+		if (strictNames && resolvedName !== desiredName) {
+			logRejected("name_taken", `${principal.principal} → "${desiredName}"`);
+			return errorJson("name_taken", 409, { name: desiredName });
+		}
 	}
 
 	const card: AgentCard = {
@@ -785,6 +929,8 @@ async function handleRegister(req: Request): Promise<Response> {
 		...card,
 		registered_at: existing?.registered_at ?? nowIso(),
 		last_seen_at: nowIso(),
+		...(auth?.token_hash ? { token_hash: auth.token_hash } : {}),
+		principal: principal.principal,
 	};
 
 	if (existing && existing.name !== entry.name) {
@@ -793,7 +939,7 @@ async function handleRegister(req: Request): Promise<Response> {
 	p.agents.set(body.session_id, entry);
 	nameIndexAdd(p, entry.name, body.session_id);
 
-	logRegister(entry.name, projectName, body.session_id, isReregister);
+	logRegister(entry.name, projectName, body.session_id, isReregister, DIRECTORY_MODE ? principal.principal : undefined);
 
 	// Emit agent_joined to OTHER streams (do not echo to a stream that may not
 	// exist yet — the registering client opens SSE next).
@@ -1525,8 +1671,10 @@ async function router(req: Request): Promise<Response> {
 	}
 
 	// All /v1/* require bearer auth.
+	let auth: AuthResult | null = null;
 	if (pathname.startsWith("/v1/")) {
-		if (!authed(req)) return unauthorized();
+		auth = authenticate(req);
+		if (!auth) return unauthorized();
 	} else {
 		// Unknown non-/v1 route.
 		return errorJson("not_found", 404);
@@ -1534,7 +1682,7 @@ async function router(req: Request): Promise<Response> {
 
 	// 2. POST /v1/agents/register
 	if (pathname === "/v1/agents/register" && method === "POST") {
-		return handleRegister(req);
+		return handleRegister(req, auth);
 	}
 
 	// 3. GET /v1/events
@@ -1708,10 +1856,22 @@ function keepaliveTick(): void {
 	}
 }
 
+let authRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
 function startLoops(): void {
 	staleScanTimer = setInterval(staleScanTick, STALE_SCAN_INTERVAL_MS);
 	ttlScanTimer = setInterval(ttlScanTick, TTL_SCAN_INTERVAL_MS);
 	keepaliveTimer = setInterval(keepaliveTick, SSE_KEEPALIVE_MS);
+	if (DIRECTORY_MODE) {
+		authRefreshTimer = setInterval(() => {
+			void refreshTokenDirectory();
+		}, AUTH_REFRESH_MS);
+		try {
+			(authRefreshTimer as any).unref?.();
+		} catch {
+			// noop
+		}
+	}
 	for (const t of [staleScanTimer, ttlScanTimer, keepaliveTimer]) {
 		try {
 			(t as any).unref?.();
@@ -1725,18 +1885,21 @@ function stopLoops(): void {
 	if (staleScanTimer) clearInterval(staleScanTimer);
 	if (ttlScanTimer) clearInterval(ttlScanTimer);
 	if (keepaliveTimer) clearInterval(keepaliveTimer);
+	if (authRefreshTimer) clearInterval(authRefreshTimer);
 	staleScanTimer = null;
 	ttlScanTimer = null;
 	keepaliveTimer = null;
+	authRefreshTimer = null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // main() — only runs when launched directly
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function main(): void {
-	// Token policy.
-	if (!TOKEN) {
+export async function main(): Promise<void> {
+	// Token policy. Directory mode needs no shared token: the directory is the
+	// perimeter, and PI_COMS_NET_AUTH_TOKEN (if set) is just the root principal.
+	if (!TOKEN && !DIRECTORY_MODE) {
 		if (!isLoopback(HOST)) {
 			console.error(
 				`coms-net: refusing to bind ${HOST} without an explicit PI_COMS_NET_AUTH_TOKEN.`,
@@ -1747,6 +1910,17 @@ export function main(): void {
 		TOKEN_FILE_OWNED_BY_US = true;
 	} else {
 		TOKEN_FILE_OWNED_BY_US = false;
+	}
+
+	// Load the token directory before accepting requests.
+	if (DIRECTORY_MODE) {
+		await refreshTokenDirectory();
+		if (tokenDirectory.size === 0 && !TOKEN) {
+			console.error(
+				"coms-net: directory mode is on but no principals loaded and no root token set; nothing could ever authenticate.",
+			);
+			process.exit(1);
+		}
 	}
 
 	const dir = projectDir(PROJECT);
@@ -1900,5 +2074,5 @@ export function main(): void {
 }
 
 if (import.meta.main) {
-	main();
+	void main();
 }

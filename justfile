@@ -27,3 +27,13 @@ coms-net-server-lan:
 # coms-net agent share a name, e.g.: just coms --name laptop --cname laptop
 coms *args:
     pi -e extensions/coms-net.ts {{args}}
+
+# Fleet auth principals (SSM-backed; IAM on /pi-coms/auth decides who may run these)
+token-create principal names="" kind="operator" profile="":
+    ./deploy/token-admin.sh create {{principal}} "{{names}}" "{{kind}}" "{{profile}}"
+
+token-revoke principal profile="":
+    ./deploy/token-admin.sh revoke {{principal}} "{{profile}}"
+
+token-list profile="":
+    ./deploy/token-admin.sh list "{{profile}}"
