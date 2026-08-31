@@ -21,10 +21,12 @@ function deps(over: Partial<CycleDeps> = {}): CycleDeps & { sent: string[] } {
 		sent,
 		checks: [{ name: "alarms", run: async () => [F()] }],
 		state: new MonitorState(":memory:"),
-		investigate: async () =>
-			new Map([
+		investigate: async () => ({
+			diagnoses: new Map([
 				["alarm:cpu:ALARM", { probable_cause: "load", affected_resources: [], suggested_action: "scale" }],
 			]),
+			failure: null,
+		}),
 		report: async (text: string) => {
 			sent.push(text);
 		},
@@ -44,7 +46,7 @@ describe("runCycle", () => {
 	});
 
 	test("investigation failure still ships the raw finding", async () => {
-		const d = deps({ investigate: async () => null });
+		const d = deps({ investigate: async () => ({ diagnoses: null, failure: null }) });
 		await runCycle(d);
 		expect(d.sent[0]).toContain("uninvestigated");
 	});
@@ -138,4 +140,12 @@ describe("makeGuard", () => {
 		await Promise.all([guard(slow), guard(slow), guard(slow)]);
 		expect(ran).toBe(1);
 	});
+});
+
+test("investigation failure reason reaches the report", async () => {
+	const d = deps({
+		investigate: async () => ({ diagnoses: null, failure: "agent reply error: response not valid JSON" }),
+	});
+	await runCycle(d);
+	expect(d.sent[0]).toContain("uninvestigated: agent reply error: response not valid JSON");
 });

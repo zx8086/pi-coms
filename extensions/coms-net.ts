@@ -31,6 +31,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { applyExtensionDefaults } from "./themeMap.ts";
+import { extractJsonPayload } from "./jsonPayload.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -1754,11 +1755,12 @@ export default function (pi: ExtensionAPI) {
 		let payload: any = lastAssistantText;
 		let error: string | null = null;
 		if (inbound.response_schema && typeof inbound.response_schema === "object") {
-			try {
-				payload = JSON.parse(lastAssistantText);
-			} catch {
+			const parsed = extractJsonPayload(lastAssistantText);
+			if (parsed === undefined) {
 				error = "response not valid JSON";
 				payload = null;
+			} else {
+				payload = parsed;
 			}
 		}
 
