@@ -71,13 +71,13 @@ Operating notes:
 
 ### Adding an account
 
-1. Copy `deploy/accounts/poc` to `deploy/accounts/<name>`.
+1. Copy `deploy/accounts/eu-oit-dev` to `deploy/accounts/<name>`.
 2. Create `terraform.tfvars` (gitignored):
 
 ```hcl
 aws_profile     = "<cli-profile>"
 repo_url        = "https://github.com/zx8086/pi-coms.git"
-coms_auth_token = "<hub token>"        # fetch command in accounts/poc/main.tf
+coms_auth_token = "<hub token>"        # sourcing notes in accounts/eu-oit-dev/main.tf
 ssh_public_key  = "ssh-ed25519 ..."    # optional, enables herdr --remote
 subnet_id       = "subnet-..."         # optional, see Placement below
 instance_type   = "t4g.micro"          # optional, default t4g.small
@@ -109,7 +109,7 @@ Source: `deploy/modules/agent/main.tf`.
 
 ### Placement
 
-The module defaults to the default VPC's first default subnet. That subnet can sit in an Availability Zone without the chosen instance type (us-east-1e has no t4g capacity), which fails the apply. Pin `subnet_id` to a default subnet in a supported zone. Both `subnet_id` and `instance_type` pass through the account root (`deploy/accounts/poc/main.tf`).
+The module defaults to the default VPC's first default subnet. That subnet can sit in an Availability Zone without the chosen instance type (us-east-1e has no t4g capacity), which fails the apply. Pin `subnet_id` to a default subnet in a supported zone. Both `subnet_id` and `instance_type` pass through the account root (`deploy/accounts/eu-oit-dev/main.tf`).
 
 ### Shell access
 
@@ -136,7 +136,7 @@ Fixed cost per account, us-east-1 on-demand at ~730 hours/month:
 | SSM, default CloudWatch metrics, data transfer | ~$0 |
 | Total | ~$13.00 |
 
-Each additional account adds the same amount. The default `instance_type` is t4g.small (~$12.26/mo for the instance alone); the poc account pins t4g.micro via tfvars, which fits the workload (~400 MB used of 1 GB, CPU under 3% idle).
+Each additional account adds the same amount. The default `instance_type` is t4g.small (~$12.26/mo for the instance alone); the retired poc account pinned t4g.micro via tfvars, which fit its workload (~400 MB used of 1 GB, CPU under 3% idle).
 
 Networking rounds to zero beyond the IPv4 address:
 

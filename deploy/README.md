@@ -24,15 +24,15 @@ like every other account.
 | `hub/Dockerfile` | The hub container. Runs anywhere with Docker; needs only `PI_COMS_NET_AUTH_TOKEN` and a public URL. Mounts a volume for the sqlite mailbox. |
 | `hostinger/` | The live hub (`docker-compose.yml` behind Traefik) plus the VPS agent shim. |
 | `modules/agent/` | Terraform module: one Pi agent in one AWS account. IAM role, EC2 host, secrets, userdata shim. |
-| `accounts/<name>/` | One root per AWS account. Copy `accounts/poc`, set the profile, apply. |
+| `accounts/<name>/` | One root per AWS account. Copy `accounts/eu-oit-dev`, set the profile, apply. |
 
 ## Adding an AWS account
 
-1. Copy `accounts/poc` to `accounts/<name>`.
+1. Copy `accounts/eu-oit-dev` to `accounts/<name>`.
 2. Create `terraform.tfvars` (gitignored) with the account's `aws_profile`,
    `region`, `repo_url` (this repo's clone URL, reachable from the instance),
-   and `coms_auth_token` (the hub's token; fetch command in
-   `accounts/poc/main.tf`).
+   and `coms_auth_token` (the hub's token; sourcing notes in
+   `accounts/eu-oit-dev/main.tf`).
 3. `terraform init && terraform apply`.
 4. Populate the provider-keys secret the output names, then reboot the
    instance:
