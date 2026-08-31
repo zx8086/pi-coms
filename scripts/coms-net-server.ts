@@ -38,7 +38,7 @@ const REG_ROOT = path.join(os.homedir(), ".pi", "coms-net");
 
 const MAX_HOPS = Number(process.env.PI_COMS_NET_MAX_HOPS ?? 5);
 const MESSAGE_TTL_MS = Number(process.env.PI_COMS_NET_MESSAGE_TTL_MS ?? 1_800_000);
-const MAX_TTL_MS = Number(process.env.PI_COMS_NET_MAX_TTL_MS ?? 604_800_000);
+const MAX_TTL_MS = Number(process.env.PI_COMS_NET_MAX_TTL_MS ?? 1_209_600_000);
 const MAX_INBOX = Number(process.env.PI_COMS_NET_MAX_INBOX ?? 100);
 const HEARTBEAT_MS = Number(process.env.PI_COMS_NET_HEARTBEAT_MS ?? 10_000);
 const STALE_AFTER_MS = Number(process.env.PI_COMS_NET_STALE_AFTER_MS ?? 30_000);

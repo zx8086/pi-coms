@@ -1202,7 +1202,7 @@ export default function (pi: ExtensionAPI) {
 			prompt: Type.String({ description: "The prompt to send." }),
 			conversation_id: Type.Optional(Type.String()),
 			response_schema: Type.Optional(Type.Any({ description: "Optional JSON Schema describing the expected response shape." })),
-			ttl_ms: Type.Optional(Type.Number({ description: "Optional TTL in ms. Beyond the server default (30 min) the message is queued durably for an offline peer name and delivered when it next registers. Capped by the server (default 7 days)." })),
+			ttl_ms: Type.Optional(Type.Number({ description: "Optional TTL in ms. Beyond the server default (30 min) the message is queued durably for an offline peer name and delivered when it next registers. Capped by the server (default 14 days)." })),
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");

@@ -34,7 +34,7 @@ States: `queued`, `delivered`, `complete`, `error`, `timeout` (`scripts/coms-net
 3. **Reply.** On `agent_end`, the extension takes the final assistant message of that turn and submits it via `POST /v1/messages/:id/response` (`extensions/coms-net.ts:1650-1707`). The hub pushes a `response` event to the sender and releases any awaiters.
 4. **Collect.** The sender's `coms_net_await` races three sources: the local SSE-resolved promise, a server long-poll on `/v1/messages/:id/await`, and a local timer (`extensions/coms-net.ts:1437`).
 
-Messages expire 30 minutes after creation by default (`PI_COMS_NET_MESSAGE_TTL_MS`); expired queued or delivered messages become `error: "expired"`. A send may request a longer `ttl_ms`, capped by `PI_COMS_NET_MAX_TTL_MS` (default 7 days).
+Messages expire 30 minutes after creation by default (`PI_COMS_NET_MESSAGE_TTL_MS`); expired queued or delivered messages become `error: "expired"`. A send may request a longer `ttl_ms`, capped by `PI_COMS_NET_MAX_TTL_MS` (default 14 days).
 
 ### Mailbox: durable sends to offline peers
 
@@ -72,7 +72,7 @@ The local `coms` transport relies on the hop counter alone; its inbound injectio
 | Hop limit | `hops` increments when a send happens inside an inbound-triggered turn; sends at the ceiling are rejected by client and hub | 5 (`PI_COMS_NET_MAX_HOPS` / `PI_COMS_MAX_HOPS`) |
 | Ping-pong guard | Injected guard text plus tool-description warnings (coms-net) | -- |
 | Inbox cap | Hub rejects sends when the target has 100 undelivered or unanswered messages | `PI_COMS_NET_MAX_INBOX` |
-| Message TTL | Undelivered or unanswered messages expire | 30 min (`PI_COMS_NET_MESSAGE_TTL_MS`); per-send `ttl_ms` capped at 7 d (`PI_COMS_NET_MAX_TTL_MS`) |
+| Message TTL | Undelivered or unanswered messages expire | 30 min (`PI_COMS_NET_MESSAGE_TTL_MS`); per-send `ttl_ms` capped at 14 d (`PI_COMS_NET_MAX_TTL_MS`) |
 | Audit log | Every send/receive/response logged with `msg_id`, names, hops -- never prompt or response bodies | -- |
 
 A fresh user-initiated send starts at `hops = 0`. A send made while answering an inbound message inherits `inbound.hops + 1` (`extensions/coms-net.ts:1208-1211`), so a forwarding chain dies after five hosts no matter what the models decide to do.

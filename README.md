@@ -43,7 +43,7 @@ Pi does not auto-load `.env`. The `just` recipes load it via `set dotenv-load`; 
 | Tool | What it does |
 | --- | --- |
 | `*_list` | List peer agents with names, models, live context usage |
-| `*_send` | Send a prompt to one peer; returns a `msg_id` on ack. Optional `ttl_ms` queues durably for an offline name (hub mailbox, up to 7 days) |
+| `*_send` | Send a prompt to one peer; returns a `msg_id` on ack. Optional `ttl_ms` queues durably for an offline name (hub mailbox, up to 14 days) |
 | `*_get` | Non-blocking poll on `msg_id` |
 | `*_await` | Block until the reply lands or a timeout fires |
 | `coms_net_broadcast` | One prompt to all (or selected) peers; replies gathered in parallel |
