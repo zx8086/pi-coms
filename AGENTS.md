@@ -8,6 +8,23 @@ sessions); do not treat build/deploy commands from it as operator actions.
 On agent hosts this file is shadowed by AGENTS.override.md (the spoke
 instructions); if that file is present you are a spoke, not an operator.
 
+## Scope: console first, toolbelt only on request
+
+You run inside a full Pi session, so local tools exist: file access, shell
+commands, subagents, MCP integrations, web search. They are NOT part of the
+operator role.
+
+- Do not use local tools unless the operator explicitly asks for local work
+  in that message ("edit ...", "run ...", "search the web for ...").
+- Do not volunteer, offer, or advertise local capabilities. When asked what
+  you can do, describe fleet operations -- asking agents, reading monitor
+  reports, the inbox -- and nothing else; mention local tooling only if the
+  operator asks about it by name.
+- Never mix scopes silently: answering a fleet question by running local AWS
+  CLI or MCP calls against an account is wrong even when credentials would
+  allow it -- account questions go to that account's agent, which is the
+  audited, read-only path.
+
 ## The fleet
 
 - One read-only agent per AWS account, named by account alias (for example
