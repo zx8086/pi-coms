@@ -108,8 +108,8 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
    traefik router for coms.siobytes.cloud, pi-agent/herdr units, /srv/pi-coms,
    DNS record) were deliberately left as-is; the parked teardown plan lives in
    SIO-1586's description if anyone ever wants it. NEVER git in /srv.
-6. DONE 2026-08-31 late evening -- filed as SIO-1585 (bootstrap retry around
-   the first credentialed AWS call), Backlog.
+6. DONE 2026-08-31 late evening -- filed as SIO-1585, then implemented and
+   deployed the same night (see addendum).
 
 ## Addendum -- late evening 2026-08-31 (fresh session, `86bd352`)
 
@@ -118,7 +118,14 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
   changes, and both list calls succeed under `devops-readonly` on both agent
   hosts (checked via SSM, base64-script pattern). The last unchecked place a
   shutdown could hide (SSM Automation-document schedulers) is now readable.
-- SIO-1585 filed: bootstrap retry around the first credentialed AWS call.
+- SIO-1585 filed, implemented, and DEPLOYED (Done): the bootstrap now polls
+  `aws sts get-caller-identity` (10 x 3 s, gated to the aws paths) before its
+  first credentialed call, closing the cold-boot IMDS gap that aborted an OIT
+  boot. PR #32, `12cc882`; fleet bundle published at `12cc882`; bootstrap
+  re-run on the shared host via SSM verified the warm path (bundle updated,
+  sts wait present in the deployed script, all three units active, live agent
+  left alone). OIT converges via pi-coms-update within 30 min. The cold-boot
+  path gets its real proof on the next instance replacement.
 - SIO-1586 executed and Done: poc estate decommissioned at terraform scope
   (see next-steps item 5 for detail). Scope was narrowed by the operator to
   what this repo's terraform built; VPS pieces and DNS stay as-is.
@@ -127,7 +134,7 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
   the poc estate.
 - Still open after tonight: next-steps items 3 (operator tunnel + session
   restart) and 4 (O4 security sign-off, O8 VPN CIDR, O10 digest owner,
-  R1 Bedrock policy, R3 plain HTTP), plus SIO-1585 in the backlog.
+  R1 Bedrock policy, R3 plain HTTP).
 
 ## Gotchas (hard-won tonight, will bite again)
 
