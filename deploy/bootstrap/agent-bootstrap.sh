@@ -186,6 +186,11 @@ ENV_FILE="$AGENT_HOME/.coms-env"
   echo "export PI_COMS_NET_AUTH_TOKEN='$COMS_TOKEN'"
   if [ -n "${AWS_REGION:-}" ]; then echo "export AWS_REGION='$AWS_REGION'"; fi
   if [ -n "${AWS_ACCOUNT_ID:-}" ]; then echo "export AWS_ACCOUNT_ID='$AWS_ACCOUNT_ID'"; fi
+  # Monitor identity follows the agent name, so friendly names (e.g.
+  # eu-oit-dev) keep the pair aligned: monitor-<agent> investigates <agent>.
+  # With the default aws-<account_id> name this matches the old derivation.
+  echo "export PI_MONITOR_NAME='monitor-$AGENT_NAME'"
+  echo "export PI_MONITOR_INVESTIGATE_TARGET='$AGENT_NAME'"
   if [ -n "$PROVIDER_EXPORTS" ]; then echo "$PROVIDER_EXPORTS"; fi
 } > "$ENV_FILE"
 chown "$AGENT_USER:$AGENT_USER" "$ENV_FILE"

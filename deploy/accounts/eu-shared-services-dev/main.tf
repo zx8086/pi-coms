@@ -82,6 +82,12 @@ variable "pi_model" {
   default     = "eu.anthropic.claude-sonnet-5"
 }
 
+variable "agent_name" {
+  description = "coms-net name for this account's agent. Account-and-environment names read better than account ids in a fleet; the monitor pairs itself as monitor-<agent_name>."
+  type        = string
+  default     = "eu-shared-services-dev"
+}
+
 variable "org_id" {
   description = "AWS Organizations id (o-...). Scopes distribution-bucket reads to principals inside the org, so spoke-account agent roles can fetch the bundle without per-role policy churn."
   type        = string
@@ -149,6 +155,7 @@ module "agent" {
   hub_url             = module.hub.hub_url
   coms_auth_token     = var.coms_auth_token
   repo_url            = var.repo_url
+  agent_name          = var.agent_name
   subnet_id           = var.agent_subnet_id
   associate_public_ip = false
   instance_type       = "t4g.micro"
