@@ -258,6 +258,8 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
           "events:ListRuleNamesByTarget",
           "ssm:DescribeMaintenanceWindows",
           "ssm:DescribeMaintenanceWindowTargets",
+          "ssm:ListDocuments",
+          "ssm:ListAssociations",
           "compute-optimizer:GetECSServiceRecommendations",
           "compute-optimizer:GetEC2InstanceRecommendations",
         ]
