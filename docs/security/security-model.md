@@ -30,6 +30,25 @@ Every agent shares one token and one coms project; account isolation comes from 
 - A generated token is written to `~/.pi/coms-net/projects/<project>/server.secret.json` with mode 0600. The client refuses to read that file unless its mode is exactly 0600 (`extensions/coms-net.ts:306-321`).
 - No rate limiting exists beyond the per-target inbox cap (429) and the hop limit (409). The token is the perimeter.
 
+### Per-principal tokens (directory mode)
+
+For multi-user deployments the single shared token can be replaced with one token per principal (each person, agent, and monitor). Directory mode activates when either source is set; unset, the hub behaves exactly as above.
+
+| Variable | Source |
+|----------|--------|
+| `PI_COMS_NET_AUTH_SSM_PATH` | SSM Parameter Store path (e.g. `/pi-coms/auth`), one `SecureString` per principal, polled via the host's `aws` CLI |
+| `PI_COMS_NET_AUTH_FILE` | A `tokens.json` file for non-AWS hubs: `{"principals": {"simon": {"token": "...", "kind": "operator", "names": ["simon", "ops"]}}}` |
+| `PI_COMS_NET_AUTH_REFRESH_MS` | Directory refresh interval (default 60 s) |
+
+Semantics:
+
+1. The hub keeps only SHA-256 hashes of tokens in its long-lived map; each session records which principal registered it, and log lines carry `principal=`.
+2. **Name binding**: a principal may only register names on its list (exact, `prefix-*`, or `*`); a name held by another principal's live session is `409 name_taken`, never auto-suffixed. This closes name-squatting: nobody can claim an agent's name during its restart window.
+3. **Revocation**: deleting a principal's parameter (or file entry) takes effect on the next refresh -- further requests get 401 and live SSE sessions are closed with reason `revoked`. One person out; nobody else touched. A failed refresh keeps the previous directory, so a transient SSM error never locks the fleet out.
+4. `PI_COMS_NET_AUTH_TOKEN`, if also set, acts as a root principal with unrestricted names (migration aid); in directory mode the hub can also run without it.
+
+Administration is `just token-create <principal> [names] [kind] [profile]` / `token-revoke` / `token-list` (`deploy/token-admin.sh`), which are thin wrappers over `aws ssm` -- so who may create or revoke tokens is itself an IAM policy on the parameter path, and every action lands in CloudTrail. Tokens are printed once at creation and never stored outside Parameter Store.
+
 ## Network exposure
 
 | Host | Inbound surface | Justification |
@@ -92,7 +111,7 @@ Agents accept natural-language prompts from any peer holding the token, and inbo
 3. The inbox cap (100) and message TTL bound queue-stuffing. Mailbox sends stretch the TTL to 14 days, and a send to an offline name is not counted by the inbox cap (the cap counts messages per live session, and there is none yet) -- for offline names the bound is the TTL sweep plus the single-token perimeter. Durability extends the window, not the audience: any token holder could already send at will.
 4. The audit trail records who messaged whom, without retaining payloads that might themselves be sensitive.
 
-There is no per-peer authorization: any token holder can prompt any agent. If peers ever need different privileges, that separation must come from separate hubs or projects with separate tokens.
+In single-token mode there is no per-peer authorization: any token holder can prompt any agent. Directory mode (above) adds identity, name binding, and per-principal revocation; message-level authorization (who may prompt whom, who may read which inbox) remains open -- genuinely separate trust domains still belong on separate hubs.
 
 ## Operational rules
 
