@@ -70,6 +70,18 @@ fi
 
 id -u "$AGENT_USER" &>/dev/null || useradd -m -s /bin/bash "$AGENT_USER"
 
+# ── Swap ───────────────────────────────────────────────────────────────────
+# Investigation turns spawn a model context plus bursts of aws CLI processes;
+# on a 1 GB host that OOM-killed the agent mid-answer (observed 2026-08-31).
+# 2 GB of swap turns a kill into a slowdown.
+if [ ! -f /swapfile ]; then
+  dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+fi
+swapon /swapfile 2>/dev/null || true
+grep -q "^/swapfile" /etc/fstab || echo "/swapfile none swap sw 0 0" >> /etc/fstab
+
 # ── Runtime and tools ──────────────────────────────────────────────────────
 sudo -u "$AGENT_USER" -H env AGENT_HOME="$AGENT_HOME" bash -euo pipefail <<'BOOTSTRAP'
 export HOME="$AGENT_HOME"

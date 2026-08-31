@@ -165,7 +165,7 @@ module "agent" {
   agent_name          = var.agent_name
   subnet_id           = var.agent_subnet_id
   associate_public_ip = false
-  instance_type       = "t4g.micro"
+  instance_type       = "t4g.small" # 1 GB OOM-killed the agent mid-investigation; 2 GB + swap
   pi_model            = var.pi_model
   pi_provider         = "amazon-bedrock"
   enable_bedrock      = true
