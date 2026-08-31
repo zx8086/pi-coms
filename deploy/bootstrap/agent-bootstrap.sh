@@ -15,8 +15,8 @@
 #     PI_COMS_NET_SERVER_URL   hub base URL (http://127.0.0.1:8787 or https://...)
 #     SECRETS_SOURCE           "aws" or "file"
 #   SECRETS_SOURCE=aws:
-#     COMS_TOKEN_SECRET_ARN    Secrets Manager ARN holding the bearer token string
-#     PROVIDER_KEYS_SECRET_ARN Secrets Manager ARN holding a JSON object of
+#     COMS_TOKEN_PARAM         SSM SecureString parameter name holding the bearer token
+#     PROVIDER_KEYS_PARAM      SSM SecureString parameter name holding a JSON object of
 #                              provider API keys, e.g. {"OPENAI_API_KEY":"sk-..."}
 #     AWS_REGION               region for the CLI calls; exported to the agent
 #   SECRETS_SOURCE=file:
@@ -32,6 +32,9 @@
 #     AWS_ACCOUNT_ID  exported to the agent env when set
 #     SSH_PUBLIC_KEY  authorizes one key for AGENT_USER (herdr --remote)
 #     EXTRA_UNIT_DEPS extra systemd units pi-agent.service requires, e.g. docker.service
+#     BUNDLE_S3_URI   S3 prefix of the fleet bundle (bundle.tar.gz + version).
+#                     When set, code comes from S3 instead of git and the
+#                     pi-coms-update convergence script is installed.
 set -euo pipefail
 
 AGENT_USER="${AGENT_USER:-piagent}"
@@ -101,10 +104,29 @@ PROFILE
 BOOTSTRAP
 
 # ── Project checkout ───────────────────────────────────────────────────────
-if [ -d "$AGENT_HOME/pi-coms/.git" ]; then
-  sudo -u "$AGENT_USER" -H git -C "$AGENT_HOME/pi-coms" pull --ff-only
+BUNDLE_S3_URI="${BUNDLE_S3_URI:-}"
+if [ -n "$BUNDLE_S3_URI" ]; then
+  # AWS-native path: the S3 fleet bundle is the source of truth; the host
+  # never talks to GitHub. Vendored node_modules ride in the bundle.
+  command -v aws >/dev/null || { echo "aws cli required for BUNDLE_S3_URI" >&2; exit 1; }
+  TMP_BUNDLE="$(mktemp -d)"
+  aws s3 cp "$BUNDLE_S3_URI/bundle.tar.gz" "$TMP_BUNDLE/bundle.tar.gz" --region "${AWS_REGION:?AWS_REGION required with BUNDLE_S3_URI}"
+  aws s3 cp "$BUNDLE_S3_URI/version" "$TMP_BUNDLE/version" --region "$AWS_REGION" 2>/dev/null || echo unknown > "$TMP_BUNDLE/version"
+  rm -rf "$AGENT_HOME/pi-coms.new"
+  mkdir -p "$AGENT_HOME/pi-coms.new"
+  tar -xzf "$TMP_BUNDLE/bundle.tar.gz" -C "$AGENT_HOME/pi-coms.new"
+  cp "$TMP_BUNDLE/version" "$AGENT_HOME/pi-coms.new/.bundle-version"
+  rm -rf "$AGENT_HOME/pi-coms.old"
+  [ -d "$AGENT_HOME/pi-coms" ] && mv "$AGENT_HOME/pi-coms" "$AGENT_HOME/pi-coms.old"
+  mv "$AGENT_HOME/pi-coms.new" "$AGENT_HOME/pi-coms"
+  rm -rf "$AGENT_HOME/pi-coms.old" "$TMP_BUNDLE"
+  chown -R "$AGENT_USER:$AGENT_USER" "$AGENT_HOME/pi-coms"
 else
-  sudo -u "$AGENT_USER" -H git clone --depth 1 "$REPO_URL" "$AGENT_HOME/pi-coms"
+  if [ -d "$AGENT_HOME/pi-coms/.git" ]; then
+    sudo -u "$AGENT_USER" -H git -C "$AGENT_HOME/pi-coms" pull --ff-only
+  else
+    sudo -u "$AGENT_USER" -H git clone --depth 1 "$REPO_URL" "$AGENT_HOME/pi-coms"
+  fi
 fi
 sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/bun install"
 
@@ -113,20 +135,20 @@ sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/b
 
 case "$SECRETS_SOURCE" in
   aws)
-    : "${COMS_TOKEN_SECRET_ARN:?COMS_TOKEN_SECRET_ARN required for SECRETS_SOURCE=aws}"
-    : "${PROVIDER_KEYS_SECRET_ARN:?PROVIDER_KEYS_SECRET_ARN required for SECRETS_SOURCE=aws}"
+    : "${COMS_TOKEN_PARAM:?COMS_TOKEN_PARAM required for SECRETS_SOURCE=aws}"
+    : "${PROVIDER_KEYS_PARAM:?PROVIDER_KEYS_PARAM required for SECRETS_SOURCE=aws}"
     : "${AWS_REGION:?AWS_REGION required for SECRETS_SOURCE=aws}"
     command -v aws >/dev/null || { echo "aws cli not found" >&2; exit 1; }
 
-    COMS_TOKEN="$(aws secretsmanager get-secret-value \
-      --secret-id "$COMS_TOKEN_SECRET_ARN" --region "$AWS_REGION" \
-      --query SecretString --output text)"
+    COMS_TOKEN="$(aws ssm get-parameter \
+      --name "$COMS_TOKEN_PARAM" --region "$AWS_REGION" \
+      --with-decryption --query Parameter.Value --output text)"
 
-    # Provider keys may be unpopulated on first boot; tolerate that so the host
-    # still comes up and registers.
-    PROVIDER_JSON="$(aws secretsmanager get-secret-value \
-      --secret-id "$PROVIDER_KEYS_SECRET_ARN" --region "$AWS_REGION" \
-      --query SecretString --output text 2>/dev/null || echo '{}')"
+    # Provider keys may still be the "{}" placeholder on first boot; tolerate
+    # that so the host still comes up and registers.
+    PROVIDER_JSON="$(aws ssm get-parameter \
+      --name "$PROVIDER_KEYS_PARAM" --region "$AWS_REGION" \
+      --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '{}')"
 
     PROVIDER_EXPORTS="$(echo "$PROVIDER_JSON" | python3 -c \
       'import json,sys,shlex
@@ -360,6 +382,28 @@ sed -i \
 
 chown "$AGENT_USER:$AGENT_USER" "$AGENT_HOME/bin/start-pi-agent.sh"
 chmod 755 "$AGENT_HOME/bin/start-pi-agent.sh"
+
+# ── Convergence script (S3 bundle mode only) ──────────────────────────────
+# Run by an SSM State Manager association (or ad hoc via Run Command): pull
+# the version file, and when it changed, re-run this bootstrap to swap the
+# bundle and restart the services. Root-owned; SSM runs commands as root.
+if [ -n "$BUNDLE_S3_URI" ]; then
+  cat > /usr/local/bin/pi-coms-update <<UPDATE
+#!/usr/bin/env bash
+set -euo pipefail
+CURRENT="\$(cat '$AGENT_HOME/pi-coms/.bundle-version' 2>/dev/null || echo none)"
+LATEST="\$(aws s3 cp '$BUNDLE_S3_URI/version' - --region '$AWS_REGION' 2>/dev/null || echo unknown)"
+if [ "\$CURRENT" = "\$LATEST" ] && [ "\$LATEST" != "unknown" ]; then
+  echo "pi-coms up to date (\$CURRENT)"
+  exit 0
+fi
+echo "updating pi-coms: \$CURRENT -> \$LATEST"
+# The userdata shim owns the env contract; re-running it re-fetches the
+# bundle (including this bootstrap) and restarts the services.
+bash /var/lib/cloud/instance/user-data.txt
+UPDATE
+  chmod 755 /usr/local/bin/pi-coms-update
+fi
 
 systemctl daemon-reload
 systemctl enable --now herdr.service

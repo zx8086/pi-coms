@@ -15,9 +15,9 @@ output "hub_private_ip" {
   value       = aws_instance.hub.private_ip
 }
 
-output "token_secret_arn" {
-  description = "Secrets Manager ARN holding the hub token in this account."
-  value       = aws_secretsmanager_secret.coms_token.arn
+output "token_parameter_name" {
+  description = "SSM SecureString parameter holding the hub token in this account."
+  value       = aws_ssm_parameter.coms_token.name
 }
 
 output "attach_to_hub" {

@@ -54,28 +54,32 @@ resource "aws_security_group" "agent" {
 }
 
 // ── Secrets ────────────────────────────────────────────────────────────────
-// Each account stores its own copy of the shared hub token, so the stack is
-// self-contained and needs no cross-account Secrets Manager policy.
+// SSM Parameter Store SecureStrings (standard tier: free; decrypted through
+// the AWS-managed aws/ssm key, so ssm:GetParameter alone suffices). Each
+// account stores its own copy of the shared hub token, so the stack is
+// self-contained and needs no cross-account policy.
 
-resource "aws_secretsmanager_secret" "coms_token" {
-  name                    = "${var.name_prefix}/auth-token"
-  description             = "Bearer token for the coms-net hub (copy of the hub's token)"
-  recovery_window_in_days = 7
+resource "aws_ssm_parameter" "coms_token" {
+  name        = "/${var.name_prefix}/auth-token"
+  description = "Bearer token for the coms-net hub (copy of the hub's token)"
+  type        = "SecureString"
+  value       = var.coms_auth_token
 }
 
-resource "aws_secretsmanager_secret_version" "coms_token" {
-  secret_id     = aws_secretsmanager_secret.coms_token.id
-  secret_string = var.coms_auth_token
-}
+// Created as a placeholder. Populate out of band so keys never land in
+// state or tfvars:
+//   aws ssm put-parameter --name /<name_prefix>/agent-provider-keys \
+//     --type SecureString --overwrite \
+//     --value '{"OPENAI_API_KEY":"sk-..."}'
+resource "aws_ssm_parameter" "provider_keys" {
+  name        = "/${var.name_prefix}/agent-provider-keys"
+  description = "Model provider API keys for the Pi agent (populate manually)"
+  type        = "SecureString"
+  value       = "{}"
 
-// Created empty. Populate out of band so keys never land in state or tfvars:
-//   aws secretsmanager put-secret-value \
-//     --secret-id <name_prefix>/agent-provider-keys \
-//     --secret-string '{"OPENAI_API_KEY":"sk-..."}'
-resource "aws_secretsmanager_secret" "provider_keys" {
-  name                    = "${var.name_prefix}/agent-provider-keys"
-  description             = "Model provider API keys for the Pi agent (populate manually)"
-  recovery_window_in_days = 7
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 // ── Instance role ──────────────────────────────────────────────────────────
@@ -148,21 +152,29 @@ resource "aws_iam_role_policy_attachment" "agent_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-// The one data-plane read the host itself needs: its two boot secrets.
+// The data-plane reads the host itself needs: its two boot parameters, and
+// (when configured) the fleet bundle in the distribution bucket.
 resource "aws_iam_role_policy" "agent_secrets" {
-  name = "read-agent-secrets"
+  name = "read-agent-parameters"
   role = aws_iam_role.agent.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = ["secretsmanager:GetSecretValue"]
-      Resource = [
-        aws_secretsmanager_secret.coms_token.arn,
-        aws_secretsmanager_secret.provider_keys.arn,
-      ]
-    }]
+    Statement = concat(
+      [{
+        Effect = "Allow"
+        Action = ["ssm:GetParameter"]
+        Resource = [
+          aws_ssm_parameter.coms_token.arn,
+          aws_ssm_parameter.provider_keys.arn,
+        ]
+      }],
+      var.dist_bucket_arn == "" ? [] : [{
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:ListBucket"]
+        Resource = [var.dist_bucket_arn, "${var.dist_bucket_arn}/*"]
+      }]
+    )
   })
 }
 
@@ -189,8 +201,8 @@ resource "aws_instance" "agent" {
 
   user_data = templatefile("${path.module}/userdata.sh.tftpl", {
     hub_url          = var.hub_url
-    token_secret_arn = aws_secretsmanager_secret.coms_token.arn
-    keys_secret_arn  = aws_secretsmanager_secret.provider_keys.arn
+    token_param_name = aws_ssm_parameter.coms_token.name
+    keys_param_name  = aws_ssm_parameter.provider_keys.name
     region           = local.region
     account_id       = local.account_id
     agent_name       = local.agent_name
@@ -199,6 +211,7 @@ resource "aws_instance" "agent" {
     pi_model         = var.pi_model
     ssh_public_key   = var.ssh_public_key
     repo_url         = var.repo_url
+    bundle_s3_uri    = var.bundle_s3_uri
   })
 
   metadata_options {
@@ -214,7 +227,7 @@ resource "aws_instance" "agent" {
 
   tags = { Name = "${var.name_prefix}-agent" }
 
-  depends_on = [aws_secretsmanager_secret_version.coms_token]
+  depends_on = [aws_ssm_parameter.coms_token]
 }
 
 // Status-check alarm on the agent host itself: gives the monitor's alarm

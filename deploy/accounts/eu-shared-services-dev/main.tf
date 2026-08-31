@@ -82,6 +82,56 @@ variable "pi_model" {
   default     = "openai/gpt-5.4-mini"
 }
 
+variable "org_id" {
+  description = "AWS Organizations id (o-...). Scopes distribution-bucket reads to principals inside the org, so spoke-account agent roles can fetch the bundle without per-role policy churn."
+  type        = string
+}
+
+// ── Fleet distribution bucket ──────────────────────────────────────────────
+// AWS-native code channel: hosts fetch the bundle from here instead of
+// cloning GitHub. Publish with deploy/publish-fleet.sh; rollback by
+// re-pointing the version object at a previous S3 object version.
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_s3_bucket" "dist" {
+  bucket = "pi-coms-dist-${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_s3_bucket_versioning" "dist" {
+  bucket = aws_s3_bucket.dist.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "dist" {
+  bucket                  = aws_s3_bucket.dist.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "dist_org_read" {
+  bucket = aws_s3_bucket.dist.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "OrgRead"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = ["s3:GetObject", "s3:ListBucket"]
+      Resource  = [aws_s3_bucket.dist.arn, "${aws_s3_bucket.dist.arn}/*"]
+      Condition = { StringEquals = { "aws:PrincipalOrgID" = var.org_id } }
+    }]
+  })
+}
+
+locals {
+  bundle_s3_uri = "s3://${aws_s3_bucket.dist.bucket}/fleet"
+}
+
 module "hub" {
   source = "../../modules/hub"
 
@@ -89,6 +139,8 @@ module "hub" {
   subnet_id       = var.hub_subnet_id
   allowed_cidrs   = var.allowed_cidrs
   repo_url        = var.repo_url
+  bundle_s3_uri   = local.bundle_s3_uri
+  dist_bucket_arn = aws_s3_bucket.dist.arn
 }
 
 module "agent" {
@@ -101,8 +153,31 @@ module "agent" {
   associate_public_ip = false
   instance_type       = "t4g.micro"
   pi_model            = var.pi_model
+  bundle_s3_uri       = local.bundle_s3_uri
+  dist_bucket_arn     = aws_s3_bucket.dist.arn
 
   depends_on = [module.hub]
+}
+
+// ── Convergence ────────────────────────────────────────────────────────────
+// Every 30 minutes each tagged host compares its bundle version against S3
+// and re-bootstraps on change. Immediate rollout: run the same command via
+// `aws ssm send-command --targets Key=tag:Project,Values=pi-coms-net`.
+
+resource "aws_ssm_association" "fleet_update" {
+  name             = "AWS-RunShellScript"
+  association_name = "pi-coms-fleet-update"
+
+  targets {
+    key    = "tag:Project"
+    values = ["pi-coms-net"]
+  }
+
+  schedule_expression = "rate(30 minutes)"
+
+  parameters = {
+    commands = "[ -x /usr/local/bin/pi-coms-update ] && /usr/local/bin/pi-coms-update || true"
+  }
 }
 
 output "hub_url" {
@@ -113,8 +188,12 @@ output "hub_instance_id" {
   value = module.hub.hub_instance_id
 }
 
-output "token_secret_arn" {
-  value = module.hub.token_secret_arn
+output "token_parameter_name" {
+  value = module.hub.token_parameter_name
+}
+
+output "dist_bucket" {
+  value = aws_s3_bucket.dist.bucket
 }
 
 output "agent_name" {
@@ -125,8 +204,8 @@ output "agent_instance_id" {
   value = module.agent.agent_instance_id
 }
 
-output "provider_keys_secret_name" {
-  value = module.agent.provider_keys_secret_name
+output "provider_keys_parameter_name" {
+  value = module.agent.provider_keys_parameter_name
 }
 
 output "attach_to_hub" {

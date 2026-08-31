@@ -10,7 +10,7 @@ set -euo pipefail
 exec > >(tee /var/log/coms-hub-bootstrap.log) 2>&1
 echo "=== coms-hub bootstrap $(date -Is) ==="
 
-dnf install -y git tar gzip unzip
+dnf install -y tar gzip unzip
 
 HUB_USER=comshub
 HUB_HOME="/home/$HUB_USER"
@@ -21,15 +21,27 @@ sudo -u "$HUB_USER" -H bash -euo pipefail -c '
   command -v "$HOME/.bun/bin/bun" >/dev/null || curl -fsSL https://bun.sh/install | bash
 '
 
-if [ -d "$HUB_HOME/pi-coms/.git" ]; then
+if [ -n '${bundle_s3_uri}' ]; then
+  # AWS-native path: fetch the fleet bundle instead of cloning GitHub.
+  rm -rf "$HUB_HOME/pi-coms.new"
+  mkdir -p "$HUB_HOME/pi-coms.new"
+  aws s3 cp '${bundle_s3_uri}/bundle.tar.gz' /tmp/hub-bundle.tar.gz --region '${region}'
+  tar -xzf /tmp/hub-bundle.tar.gz -C "$HUB_HOME/pi-coms.new"
+  rm -f /tmp/hub-bundle.tar.gz
+  rm -rf "$HUB_HOME/pi-coms"
+  mv "$HUB_HOME/pi-coms.new" "$HUB_HOME/pi-coms"
+  chown -R "$HUB_USER:$HUB_USER" "$HUB_HOME/pi-coms"
+elif [ -d "$HUB_HOME/pi-coms/.git" ]; then
+  dnf install -y git
   sudo -u "$HUB_USER" -H git -C "$HUB_HOME/pi-coms" pull --ff-only
 else
+  dnf install -y git
   sudo -u "$HUB_USER" -H git clone --depth 1 '${repo_url}' "$HUB_HOME/pi-coms"
 fi
 
-TOKEN="$(aws secretsmanager get-secret-value \
-  --secret-id '${token_secret_arn}' --region '${region}' \
-  --query SecretString --output text)"
+TOKEN="$(aws ssm get-parameter \
+  --name '${token_param_name}' --region '${region}' \
+  --with-decryption --query Parameter.Value --output text)"
 [ -n "$TOKEN" ] || { echo "hub token is empty" >&2; exit 1; }
 
 ENV_FILE="$HUB_HOME/.hub-env"

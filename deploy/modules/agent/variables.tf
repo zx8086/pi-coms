@@ -6,9 +6,21 @@ variable "hub_url" {
 }
 
 variable "coms_auth_token" {
-  description = "Shared bearer token for the hub. Same value the hub runs with; stored in this account's Secrets Manager so the instance fetches it at boot via its role."
+  description = "Shared bearer token for the hub. Same value the hub runs with; stored as an SSM SecureString parameter in this account so the instance fetches it at boot via its role."
   type        = string
   sensitive   = true
+}
+
+variable "bundle_s3_uri" {
+  description = "S3 URI of the fleet-bundle prefix (e.g. s3://pi-coms-dist/fleet). When set, the host fetches code from the bundle instead of cloning repo_url, and installs the pi-coms-update convergence script. Empty keeps the git path."
+  type        = string
+  default     = ""
+}
+
+variable "dist_bucket_arn" {
+  description = "ARN of the distribution bucket backing bundle_s3_uri; grants the instance read access. Required when bundle_s3_uri is set."
+  type        = string
+  default     = ""
 }
 
 variable "name_prefix" {

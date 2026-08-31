@@ -1,9 +1,21 @@
 # deploy/modules/hub/variables.tf
 
 variable "coms_auth_token" {
-  description = "Shared bearer token every client presents. Stored in this account's Secrets Manager; the host fetches it at boot via its role."
+  description = "Shared bearer token every client presents. Stored as an SSM SecureString parameter in this account; the host fetches it at boot via its role."
   type        = string
   sensitive   = true
+}
+
+variable "bundle_s3_uri" {
+  description = "S3 URI of the fleet-bundle prefix. When set, the host fetches code from the bundle instead of cloning repo_url. Empty keeps the git path."
+  type        = string
+  default     = ""
+}
+
+variable "dist_bucket_arn" {
+  description = "ARN of the distribution bucket backing bundle_s3_uri; grants the instance read access. Required when bundle_s3_uri is set."
+  type        = string
+  default     = ""
 }
 
 variable "subnet_id" {

@@ -9,14 +9,22 @@ set -euo pipefail
 exec > >(tee /var/log/pi-agent-bootstrap.log) 2>&1
 echo "=== pi agent userdata shim $(date -Is) ==="
 
-dnf install -y git
-
 rm -rf /opt/pi-bootstrap
-git clone --depth 1 '${repo_url}' /opt/pi-bootstrap
+if [ -n '${bundle_s3_uri}' ]; then
+  # AWS-native path: fetch the fleet bundle instead of cloning GitHub.
+  mkdir -p /opt/pi-bootstrap
+  aws s3 cp '${bundle_s3_uri}/bundle.tar.gz' /tmp/pi-bootstrap.tar.gz --region '${region}'
+  tar -xzf /tmp/pi-bootstrap.tar.gz -C /opt/pi-bootstrap
+  rm -f /tmp/pi-bootstrap.tar.gz
+else
+  dnf install -y git
+  git clone --depth 1 '${repo_url}' /opt/pi-bootstrap
+fi
 
 export SECRETS_SOURCE=aws
-export COMS_TOKEN_SECRET_ARN='${token_secret_arn}'
-export PROVIDER_KEYS_SECRET_ARN='${keys_secret_arn}'
+export COMS_TOKEN_PARAM='${token_param_name}'
+export PROVIDER_KEYS_PARAM='${keys_param_name}'
+export BUNDLE_S3_URI='${bundle_s3_uri}'
 export AWS_REGION='${region}'
 export AWS_ACCOUNT_ID='${account_id}'
 export PI_COMS_NET_SERVER_URL='${hub_url}'

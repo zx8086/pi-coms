@@ -44,16 +44,14 @@ resource "aws_security_group" "hub" {
 }
 
 // ── Secrets ────────────────────────────────────────────────────────────────
+// SSM Parameter Store SecureString (standard tier: free; decrypted through
+// the AWS-managed aws/ssm key, so ssm:GetParameter alone suffices).
 
-resource "aws_secretsmanager_secret" "coms_token" {
-  name                    = "${var.name_prefix}/auth-token"
-  description             = "Bearer token the hub runs with (agents store their own per-account copy)"
-  recovery_window_in_days = 7
-}
-
-resource "aws_secretsmanager_secret_version" "coms_token" {
-  secret_id     = aws_secretsmanager_secret.coms_token.id
-  secret_string = var.coms_auth_token
+resource "aws_ssm_parameter" "coms_token" {
+  name        = "/${var.name_prefix}/auth-token"
+  description = "Bearer token the hub runs with (agents store their own per-account copy)"
+  type        = "SecureString"
+  value       = var.coms_auth_token
 }
 
 // ── Instance role ──────────────────────────────────────────────────────────
@@ -84,11 +82,18 @@ resource "aws_iam_role_policy" "hub_secret" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue"]
-      Resource = [aws_secretsmanager_secret.coms_token.arn]
-    }]
+    Statement = concat(
+      [{
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = [aws_ssm_parameter.coms_token.arn]
+      }],
+      var.dist_bucket_arn == "" ? [] : [{
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:ListBucket"]
+        Resource = [var.dist_bucket_arn, "${var.dist_bucket_arn}/*"]
+      }]
+    )
   })
 }
 
@@ -114,10 +119,11 @@ resource "aws_instance" "hub" {
   user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/userdata.sh.tftpl", {
-    token_secret_arn = aws_secretsmanager_secret.coms_token.arn
+    token_param_name = aws_ssm_parameter.coms_token.name
     region           = local.region
     repo_url         = var.repo_url
     port             = var.port
+    bundle_s3_uri    = var.bundle_s3_uri
   })
 
   metadata_options {
@@ -133,5 +139,5 @@ resource "aws_instance" "hub" {
 
   tags = { Name = "${var.name_prefix}-hub" }
 
-  depends_on = [aws_secretsmanager_secret_version.coms_token]
+  depends_on = [aws_ssm_parameter.coms_token]
 }
