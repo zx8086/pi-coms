@@ -95,10 +95,10 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
    `i-042d0fed0cb5d8702` (port 8787; URL unchanged thanks to the pinned IP);
    restart the coms session to load the AGENTS.md parity rule.
 4. Open items on the deployment reference page: O4 security sign-off (page is
-   the review package), O8 VPN CIDR for direct access, O10 named owner for the
-   daily digest dead-man signal, R1 confirm org Bedrock policy covers agentic
-   workloads, R3 plain HTTP on the private wire (add internal ALB + private CA
-   only if policy demands).
+   the review package), O8 VPN CIDR for direct access, R1 confirm org Bedrock
+   policy covers agentic workloads, R3 plain HTTP on the private wire (add
+   internal ALB + private CA only if policy demands). O10 CLOSED 2026-08-31
+   late evening -- digest owner is the `ops` peer (see addendum, SIO-1587).
 5. CANCELLED, then DECOMMISSIONED 2026-08-31 late evening -- the operator
    retired the poc estate instead of refreshing it (SIO-1586, Done): the poc
    terraform root was destroyed (12 resources; `i-0bd23dad64ee9112b`
@@ -132,9 +132,17 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
 - Memory files updated: `poc-account-facts` and `vps-hub-deploy-layout` now
   open with DECOMMISSIONED/DEPRECATED banners so no future session redeploys
   the poc estate.
+- SIO-1587 implemented and DEPLOYED (Done), closing O10: the bootstrap now
+  writes `PI_MONITOR_REPORT_TO='ops'` into `.coms-env` (optional
+  `MONITOR_REPORT_TO` env-contract override; bootstrap layer on purpose --
+  a userdata/terraform change would replace the instances). PR #34,
+  `efdf522`; bundle published; bootstrap re-run on BOTH corp hosts, verified:
+  bundle at `efdf522`, the export present, pi-monitor active and restarted
+  21:50Z. Digests now wait durably in the hub mailbox for an `ops` session
+  instead of depending on the laptop peer.
 - Still open after tonight: next-steps items 3 (operator tunnel + session
-  restart) and 4 (O4 security sign-off, O8 VPN CIDR, O10 digest owner,
-  R1 Bedrock policy, R3 plain HTTP).
+  restart) and 4 (O4 security sign-off, O8 VPN CIDR, R1 Bedrock policy,
+  R3 plain HTTP).
 
 ## Gotchas (hard-won tonight, will bite again)
 
