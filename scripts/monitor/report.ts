@@ -65,6 +65,7 @@ const SEV_ORDER: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };
 export function formatIncidentReport(
 	accountId: string,
 	items: { finding: Finding; diagnosis: Diagnosis | null }[],
+	investigationFailure?: string | null,
 ): string {
 	const sorted = [...items].sort(
 		(a, b) => SEV_ORDER[a.finding.severity] - SEV_ORDER[b.finding.severity],
@@ -80,7 +81,7 @@ export function formatIncidentReport(
 			}
 			lines.push(`  action: ${diagnosis.suggested_action}`);
 		} else if (finding.severity !== "info") {
-			lines.push("  (uninvestigated: agent unavailable or response invalid)");
+			lines.push(`  (uninvestigated: ${investigationFailure ?? "agent unavailable or response invalid"})`);
 		}
 		lines.push(`  evidence: ${JSON.stringify(finding.evidence)}`);
 	}

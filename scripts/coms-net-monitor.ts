@@ -40,11 +40,16 @@ const COST_ABS = Number(process.env.PI_MONITOR_COST_ABS ?? 1);
 const STATE_DB =
 	process.env.PI_MONITOR_STATE_DB ?? path.join(os.homedir(), ".pi", "monitor", "state.db");
 
+export type InvestigationOutcome = {
+	diagnoses: Map<string, Diagnosis> | null;
+	failure: string | null;
+};
+
 export type CycleDeps = {
 	checks: { name: string; run: () => Promise<Finding[]> }[];
 	state: MonitorState;
 	investigate:
-		| ((findings: Finding[], priorContext: string) => Promise<Map<string, Diagnosis> | null>)
+		| ((findings: Finding[], priorContext: string) => Promise<InvestigationOutcome>)
 		| null;
 	report: (text: string) => Promise<void>;
 	log: (line: string) => void;
@@ -64,16 +69,21 @@ export async function runCycle(deps: CycleDeps): Promise<{ findings: Finding[] }
 	if (findings.length > 0) {
 		const toInvestigate = findings.filter((f) => f.severity !== "info");
 		let diagnoses: Map<string, Diagnosis> | null = null;
+		let investigationFailure: string | null = null;
 		if (toInvestigate.length > 0 && deps.investigate) {
 			const prior = toInvestigate
 				.flatMap((f) => deps.state.priorIncidents(f.resource, 3))
 				.map((r) => `${r.ts}: ${r.payload}`)
 				.join("\n");
 			try {
-				diagnoses = await deps.investigate(toInvestigate, prior);
-			} catch {
+				const outcome = await deps.investigate(toInvestigate, prior);
+				diagnoses = outcome.diagnoses;
+				investigationFailure = outcome.failure;
+			} catch (e: any) {
 				diagnoses = null;
+				investigationFailure = `investigate threw: ${e?.message ?? e}`;
 			}
+			if (investigationFailure) deps.log(`investigation failed: ${investigationFailure}`);
 		}
 		for (const f of findings) {
 			deps.state.journal("finding", { ...f, diagnosis: diagnoses?.get(f.dedup_key) ?? null });
@@ -81,6 +91,7 @@ export async function runCycle(deps: CycleDeps): Promise<{ findings: Finding[] }
 		const text = formatIncidentReport(
 			ACCOUNT_ID,
 			findings.map((f) => ({ finding: f, diagnosis: diagnoses?.get(f.dedup_key) ?? null })),
+			investigationFailure,
 		);
 		try {
 			await deps.report(text);
@@ -159,10 +170,13 @@ function main(): void {
 				response_schema: DIAGNOSIS_RESPONSE_SCHEMA,
 			});
 			const reply = await coms.awaitReply(sent.msg_id, INVESTIGATE_TIMEOUT_MS);
-			if (reply.error || reply.response == null) return null;
-			return parseDiagnoses(reply.response);
-		} catch {
-			return null;
+			if (reply.error) return { diagnoses: null, failure: `agent reply error: ${reply.error}` };
+			if (reply.response == null) return { diagnoses: null, failure: "agent reply empty" };
+			const diagnoses = parseDiagnoses(reply.response);
+			if (!diagnoses) return { diagnoses: null, failure: "agent reply did not match the diagnosis schema" };
+			return { diagnoses, failure: null };
+		} catch (e: any) {
+			return { diagnoses: null, failure: `send to ${INVESTIGATE_TARGET} failed: ${e?.message ?? e}` };
 		}
 	};
 

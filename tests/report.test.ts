@@ -71,3 +71,12 @@ describe("report", () => {
 		expect(text).toContain("1.23");
 	});
 });
+
+test("uninvestigated marker carries the concrete failure reason when known", () => {
+	const text = formatIncidentReport(
+		"111122223333",
+		[{ finding, diagnosis: null }],
+		"agent reply error: response not valid JSON",
+	);
+	expect(text).toContain("uninvestigated: agent reply error: response not valid JSON");
+});
