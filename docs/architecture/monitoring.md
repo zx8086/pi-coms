@@ -42,11 +42,11 @@ A name-queued message is claimed by the next session that registers under that n
 
 ### Flush on connect
 
-When a session's SSE stream opens, the hub -- after `hello` and `pool_snapshot` -- claims any name-addressed mail for that session and flushes its queued messages oldest-first as ordinary `prompt` events. The client needs no changes to receive them: each flushed prompt triggers a normal follow-up turn, in queue order. The prompt's sender identity comes from values stored at send time, so it renders correctly even if the sender is long gone.
+When a session's SSE stream opens, the hub -- after `hello` and `pool_snapshot` -- claims any name-addressed mail for that session and flushes its queued messages oldest-first as `prompt` events flagged `mailbox: true`. Flushed mail does NOT trigger turns on the recipient (SIO-1579): the extension shows a passive notice per message and the operator reads the content on demand with `coms_net_inbox`. The prompt's sender identity comes from values stored at send time, so it renders correctly even if the sender is long gone.
 
 ### The durable inbox: read-many, on demand
 
-Mailbox-class messages double as history. A terminal (delivered and answered, or expired-in-queue) mailbox message is retained in `messages.db` until its TTL expires, and `GET /v1/mailbox?name=<name>&limit=&since=<msg_id>` reads it back non-destructively — every operator sees the same list whenever they connect, with `since` as a stateless cursor (ULID ids sort by time). The client tool is `coms_net_inbox` (defaults to your own name; pass a shared name like `ops`). Short-TTL interactive messages never enter the inbox. Push is unchanged: a session registering as the target name still gets flush-on-connect.
+Mailbox-class messages double as history. A terminal (delivered and answered, or expired-in-queue) mailbox message is retained in `messages.db` until its TTL expires, and `GET /v1/mailbox?name=<name>&limit=&since=<msg_id>` reads it back non-destructively — every operator sees the same list whenever they connect, with `since` as a stateless cursor (ULID ids sort by time). The client tool is `coms_net_inbox` (defaults to your own name; pass a shared name like `ops`). Short-TTL interactive messages never enter the inbox. Flush-on-connect still happens, but as quiet mailbox-flagged events -- the inbox is the read path, not the push.
 
 ### Restart recovery
 
