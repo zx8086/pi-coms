@@ -183,7 +183,7 @@ resource "aws_instance" "agent" {
   subnet_id                   = data.aws_subnet.chosen.id
   vpc_security_group_ids      = [aws_security_group.agent.id]
   iam_instance_profile        = aws_iam_instance_profile.agent.name
-  associate_public_ip_address = true
+  associate_public_ip_address = var.associate_public_ip
 
   user_data_replace_on_change = true
 

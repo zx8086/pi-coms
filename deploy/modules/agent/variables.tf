@@ -53,6 +53,12 @@ variable "subnet_id" {
   default     = ""
 }
 
+variable "associate_public_ip" {
+  description = "Give the host a public IP for egress (no-NAT default-VPC pattern). Set false when subnet_id is a private subnet behind a NAT gateway; a public IP there is useless and often policy-violating."
+  type        = bool
+  default     = true
+}
+
 variable "ssh_public_key" {
   description = "Public key authorized for the piagent user, enabling `herdr --remote` over the SSM tunnel (no inbound port). Empty string disables SSH login, leaving `aws ssm start-session` as the only way in."
   type        = string

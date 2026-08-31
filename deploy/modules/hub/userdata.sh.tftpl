@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# deploy/modules/hub/userdata.sh.tftpl
+#
+# Boots the coms-net hub: install Bun, clone the repo, fetch the token,
+# run scripts/coms-net-server.ts under systemd. The hub needs no Pi, no
+# Herdr, and no provider keys, so it does not use the shared agent
+# bootstrap -- this small script is its whole install.
+set -euo pipefail
+
+exec > >(tee /var/log/coms-hub-bootstrap.log) 2>&1
+echo "=== coms-hub bootstrap $(date -Is) ==="
+
+dnf install -y git tar gzip unzip
+
+HUB_USER=comshub
+HUB_HOME="/home/$HUB_USER"
+id -u "$HUB_USER" &>/dev/null || useradd -m -s /bin/bash "$HUB_USER"
+
+sudo -u "$HUB_USER" -H bash -euo pipefail -c '
+  cd "$HOME"
+  command -v "$HOME/.bun/bin/bun" >/dev/null || curl -fsSL https://bun.sh/install | bash
+'
+
+if [ -d "$HUB_HOME/pi-coms/.git" ]; then
+  sudo -u "$HUB_USER" -H git -C "$HUB_HOME/pi-coms" pull --ff-only
+else
+  sudo -u "$HUB_USER" -H git clone --depth 1 '${repo_url}' "$HUB_HOME/pi-coms"
+fi
+
+TOKEN="$(aws secretsmanager get-secret-value \
+  --secret-id '${token_secret_arn}' --region '${region}' \
+  --query SecretString --output text)"
+[ -n "$TOKEN" ] || { echo "hub token is empty" >&2; exit 1; }
+
+ENV_FILE="$HUB_HOME/.hub-env"
+{
+  echo "export PI_COMS_NET_HOST=0.0.0.0"
+  echo "export PI_COMS_NET_PORT=${port}"
+  echo "export PI_COMS_NET_AUTH_TOKEN='$TOKEN'"
+} > "$ENV_FILE"
+chown "$HUB_USER:$HUB_USER" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
+cat > /etc/systemd/system/coms-hub.service <<UNIT
+[Unit]
+Description=coms-net hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$HUB_USER
+WorkingDirectory=$HUB_HOME/pi-coms
+Environment=HOME=$HUB_HOME
+ExecStart=/bin/bash -c 'source \$HOME/.hub-env && exec \$HOME/.bun/bin/bun scripts/coms-net-server.ts'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable coms-hub.service
+systemctl restart coms-hub.service
+
+echo "=== coms-hub bootstrap complete $(date -Is) ==="
