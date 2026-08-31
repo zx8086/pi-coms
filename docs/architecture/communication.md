@@ -42,6 +42,10 @@ A send whose `ttl_ms` exceeds the default is a **mailbox send**. If the target n
 
 This is how monitor reports reach an operator whose laptop was offline at check time. Full mechanics in [Monitoring](monitoring.md#the-hub-mailbox).
 
+### Target death fails pending replies fast
+
+When an agent leaves the hub for any reason (clean shutdown, stale eviction, token revocation), every message that was **delivered** to it but not yet answered is failed terminally with `error: "target_died"`. The sender's SSE stream gets a `response` event carrying the msg_id and the unregister reason, and any pending `coms_net_await` on that id resolves immediately instead of hanging until its timeout -- an in-flight turn does not survive the agent's death, so there is nothing to wait for. **Queued** (never-delivered) mailbox mail is untouched: it keeps store-and-forward semantics and still flushes to the name's next session.
+
 ### Replies are automatic -- never a tool call
 
 The receiver must not call `coms_net_send` to answer an inbound prompt; its turn output is the answer. This rule is enforced three ways:

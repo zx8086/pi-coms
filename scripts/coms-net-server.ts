@@ -127,6 +127,9 @@ function logOffline(name: string): void {
 function logExpired(msgId: string): void {
 	logLine("⏱", C_YELLOW, "expired", dim(tail6(msgId)));
 }
+function logTargetDied(msgId: string, target: string, reason: string): void {
+	logLine("✗", C_RED, "target-died", `${dim(tail6(msgId))} target=${target} ${dim("reason=" + reason)}`);
+}
 function logHeartbeat(name: string, pct: number, depth: number): void {
 	if (!LOG_HEARTBEAT) return;
 	logLine("♥", C_BLUE, "heartbeat", `${name} ${dim(`ctx=${pct}% queue=${depth}`)}`);
@@ -415,6 +418,7 @@ async function refreshTokenDirectory(): Promise<void> {
 				}
 				p.agents.delete(sid);
 				nameIndexRemove(p, entry.name, sid);
+				failDeliveredMail(p, projectName, sid, entry.name, "revoked");
 				logUnregister(entry.name, "revoked");
 				broadcast(p, "agent_left", {
 					project: projectName, session_id: sid, name: entry.name, reason: "revoked",
@@ -834,6 +838,41 @@ function releaseAwaiters(p: ProjectState, msg_id: string): void {
 		}
 	}
 	p.awaiters.delete(msg_id);
+}
+
+// SIO-1578: an in-flight turn does not survive its agent's death, so any
+// message delivered to a departing session that has no reply yet is failed
+// terminally and the sender is told right away -- otherwise its await hangs
+// until timeout. Queued (undelivered) mail keeps store-and-forward semantics.
+function failDeliveredMail(
+	p: ProjectState,
+	projectName: string,
+	sessionId: string,
+	targetName: string,
+	reason: string,
+): void {
+	for (const m of p.messages.values()) {
+		if (m.status !== "delivered" || m.target_session !== sessionId) continue;
+		m.status = "error";
+		m.error = "target_died";
+		m.completed_at = nowIso();
+		mailFor(projectName).upsert(m);
+		sendToStream(p, m.sender_session, "response", {
+			msg_id: m.msg_id,
+			project: projectName,
+			responder: { session_id: sessionId, name: targetName },
+			response: null,
+			error: "target_died",
+			status: "error",
+			reason,
+		});
+		sendToStream(p, m.sender_session, "message_status", {
+			msg_id: m.msg_id,
+			status: "error",
+		});
+		releaseAwaiters(p, m.msg_id);
+		logTargetDied(m.msg_id, targetName, reason);
+	}
 }
 
 function inboxDepthFor(p: ProjectState, targetSession: string): number {
@@ -1633,6 +1672,7 @@ function handleDeleteAgent(_req: Request, url: URL, sessionId: string): Response
 
 	p.agents.delete(sessionId);
 	nameIndexRemove(p, entry.name, sessionId);
+	failDeliveredMail(p, projectName, sessionId, entry.name, "shutdown");
 
 	logUnregister(entry.name, "shutdown");
 
@@ -1772,6 +1812,7 @@ function staleScanTick(): void {
 					}
 					p.streams.delete(sid);
 				}
+				failDeliveredMail(p, projectName, sid, entry.name, "stale");
 				logOffline(entry.name);
 				broadcast(
 					p,
