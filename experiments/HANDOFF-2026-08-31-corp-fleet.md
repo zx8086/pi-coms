@@ -6,6 +6,7 @@
   -- https://linear.app/siobytes/issue/SIO-1583
 - Repo state: `main` @ `a2c9b56` (PR #26 merged). No uncommitted work except
   this file and the untracked `guides/` directory that predates the session.
+  Late-evening addendum below covers up to `86bd352` (PR #30).
 - Deployment reference (live artifact, keep updating THIS url, do not create a
   new one): https://claude.ai/code/artifact/29d0a2ec-2d43-43b4-91e5-b3f507c34fe0
   Local working copy: the session scratchpad file `pi-coms-feasibility.html`
@@ -66,7 +67,7 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
 
 ## Next steps
 
-1. Operator: mark SIO-1583 Done (never set Done without their explicit word).
+1. DONE 2026-08-31 evening -- operator marked SIO-1583 Done (20:46Z).
 2. DONE 2026-08-31 evening -- re-test with new permissions passed. Both agents
    answered the shutdown question from configuration: ECS scale-to-zero via
    Application Auto Scaling scheduled actions (shared: 64 actions, down 17:00
@@ -98,11 +99,35 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
    daily digest dead-man signal, R1 confirm org Bedrock policy covers agentic
    workloads, R3 plain HTTP on the private wire (add internal ALB + private CA
    only if policy demands).
-5. poc/VPS estate (separate from corp): poc host and Hostinger VPS hub pick up
-   pi 0.84.x and all of today's fixes on their next bootstrap re-run / scp
-   deploy. VPS deploy = file copy + docker compose, NEVER git in /srv.
-6. Ticket candidates noted but not filed: bootstrap retry around the first
-   credentialed AWS call (transient IMDS gap once aborted an OIT boot).
+5. CANCELLED, then DECOMMISSIONED 2026-08-31 late evening -- the operator
+   retired the poc estate instead of refreshing it (SIO-1586, Done): the poc
+   terraform root was destroyed (12 resources; `i-0bd23dad64ee9112b`
+   terminated, both SSM params gone, state empty) and removed from the repo
+   with docs repointed to `accounts/eu-oit-dev` as the copy-me template
+   (PR #30, `86bd352`). The hand-installed VPS pieces (coms-hub container,
+   traefik router for coms.siobytes.cloud, pi-agent/herdr units, /srv/pi-coms,
+   DNS record) were deliberately left as-is; the parked teardown plan lives in
+   SIO-1586's description if anyone ever wants it. NEVER git in /srv.
+6. DONE 2026-08-31 late evening -- filed as SIO-1585 (bootstrap retry around
+   the first credentialed AWS call), Backlog.
+
+## Addendum -- late evening 2026-08-31 (fresh session, `86bd352`)
+
+- SIO-1584 (ssm:ListDocuments/ListAssociations for schedule audits) merged as
+  PR #29 and VERIFIED applied: both corp terraform roots converge to No
+  changes, and both list calls succeed under `devops-readonly` on both agent
+  hosts (checked via SSM, base64-script pattern). The last unchecked place a
+  shutdown could hide (SSM Automation-document schedulers) is now readable.
+- SIO-1585 filed: bootstrap retry around the first credentialed AWS call.
+- SIO-1586 executed and Done: poc estate decommissioned at terraform scope
+  (see next-steps item 5 for detail). Scope was narrowed by the operator to
+  what this repo's terraform built; VPS pieces and DNS stay as-is.
+- Memory files updated: `poc-account-facts` and `vps-hub-deploy-layout` now
+  open with DECOMMISSIONED/DEPRECATED banners so no future session redeploys
+  the poc estate.
+- Still open after tonight: next-steps items 3 (operator tunnel + session
+  restart) and 4 (O4 security sign-off, O8 VPN CIDR, O10 digest owner,
+  R1 Bedrock policy, R3 plain HTTP), plus SIO-1585 in the backlog.
 
 ## Gotchas (hard-won tonight, will bite again)
 
