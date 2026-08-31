@@ -79,7 +79,13 @@ command -v "$HOME/.bun/bin/bun" >/dev/null || curl -fsSL https://bun.sh/install 
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
-bun install -g @mariozechner/pi-coding-agent
+# The maintained package: @earendil-works/pi-coding-agent (the old
+# @mariozechner name is frozen at 0.73.1, which predates Claude 5's
+# adaptive-thinking requirement and breaks Bedrock Sonnet 5 with
+# 'thinking.type.enabled is not supported'). Remove a legacy install so
+# the wrapper below cannot point at stale code.
+rm -rf "$HOME/.bun/install/global/node_modules/@mariozechner/pi-coding-agent"
+bun install -g @earendil-works/pi-coding-agent
 
 # `bun install -g` leaves a `#!/usr/bin/env node` shebang on the pi symlink, and
 # these hosts have no (or too old a) Node -- pi-tui needs the regex `v` flag.
@@ -90,10 +96,10 @@ bun install -g @mariozechner/pi-coding-agent
 # Write to a temp file and mv it into place. Writing directly to ~/.bun/bin/pi
 # would follow the symlink and overwrite the package's real cli.js, corrupting
 # the install -- Bun then tries to parse shell script as JavaScript.
-PI_CLI="$HOME/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/dist/cli.js"
+PI_CLI="$HOME/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 cat > "$HOME/.pi-wrapper.tmp" <<'PIWRAP'
 #!/usr/bin/env bash
-exec "$HOME/.bun/bin/bun" "$HOME/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/dist/cli.js" "$@"
+exec "$HOME/.bun/bin/bun" "$HOME/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$@"
 PIWRAP
 rm -f "$HOME/.bun/bin/pi"
 mv "$HOME/.pi-wrapper.tmp" "$HOME/.bun/bin/pi"
