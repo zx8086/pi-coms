@@ -29,9 +29,11 @@ The hub is private; open an SSM port-forward first, then connect with your
 personal token (one name per person -- names are exclusive addresses):
 
 ```bash
-# terminal 1 -- the tunnel (dies with the SSO session). Resolves the hub
-# instance by its Name tag, so it survives instance replacement.
-just hub-tunnel
+# terminal 1 -- the tunnel (dies with the SSO session)
+aws ssm start-session --profile eu-shared-services-dev --region eu-central-1 \
+  --target <hub-instance-id> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8787"],"localPortNumber":["8787"]}'
 
 # terminal 2 -- the client
 export PI_COMS_NET_SERVER_URL=http://127.0.0.1:8787
@@ -39,10 +41,9 @@ export PI_COMS_NET_AUTH_TOKEN=<your personal token>
 just coms --name <you> --cname <you>
 ```
 
-`just hub-tunnel` wraps `aws ssm start-session` with
-`AWS-StartPortForwardingSession` after an EC2 lookup on
-`tag:Name=pi-coms-hub-hub`; profile, region, and port are overridable
-arguments.
+The hub instance id changes when the instance is replaced; find the current
+one via the EC2 console or `tag:Name=pi-coms-hub-hub` (repo users can run
+`just hub-tunnel`, which does the lookup automatically).
 
 Operator sessions load `AGENTS.md` from the repo root -- the console scope
 and synthesis rules. Personal tokens come from the directory
