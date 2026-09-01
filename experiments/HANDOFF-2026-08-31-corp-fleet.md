@@ -182,9 +182,28 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
   stock-service because the nightly cost schedule holds stock-service at
   desiredCount 0 when the job runs -- a real cross-service scheduling
   conflict, not monitor noise. Not yet passed along.
+- Morning inbox review (2026-09-01 ~07:00Z, first hours of the fully fixed
+  pipeline) -- all fixes holding: F2 confirmed live (INSUFFICIENT_DATA
+  arrived as info, uninvestigated), zero eventbridge noise since the 05:00
+  cycle, and diagnoses now cite prior dedup keys ("same known issue as
+  previously diagnosed") -- the journal's prior-incident context works.
+  What the pipeline surfaces is now account-side, not monitor-side:
+  - Alarm hygiene (BOTH account owners): the big reports (48 findings oit,
+    51 shared) are `*-Utilization-Low-20` alarms with 60 s single-datapoint
+    evaluation flapping through a task-recycle window; agent-diagnosed as
+    threshold tightness. Open question for the operator: do `*-Low-*` ALARM
+    transitions deserve critical in our reports, or is that per-account
+    alarm tuning for the owners?
+  - oit owners: recurring order-service ImagesClientV2 HTTP 404s from the
+    Images API for specific style codes (missing image mappings, diagnosed
+    with request ids) -- joins the stock-service scheduling conflict in the
+    pass-along pile.
+  - shared owners: custom `statistics-exception` metric spikes in daily
+    bursts (410 events 08-31 06:00Z, 320 on 09-01) with long silences --
+    looks like a daily job throwing repeatedly.
 - Still open after tonight: next-steps items 3 (operator tunnel + session
   restart) and 4 (O4 security sign-off, O8 VPN CIDR, R1 Bedrock policy,
-  R3 plain HTTP), plus handing the oit finding above to its account owners.
+  R3 plain HTTP), plus handing the account-owner findings above along.
 
 ## Gotchas (hard-won tonight, will bite again)
 
