@@ -64,7 +64,7 @@ The hub used to store nothing durable. It now persists **prompt and response bod
 
 | Property | Value |
 |----------|-------|
-| Peer name | `monitor-aws-<account_id>`, registered `--explicit` (hidden from lists and broadcasts unless named) |
+| Peer name | Code default `monitor-aws-<account_id>`; the bootstrap sets `monitor-<alias>` (e.g. `monitor-eu-oit-dev`) on deployed hosts. Registered `--explicit` (hidden from lists and broadcasts unless named) |
 | Scheduling | In-process `Bun.cron()` (requires Bun >= 1.4): `*/15 * * * *` for alarms/logs/drift, `7 * * * *` for the ingestion heartbeat (minute 7 keeps its guard off the */15 boundary), `@daily` for cost/trail/certs/watchlist + digest |
 | State | `bun:sqlite` at `~/.pi/monitor/state.db`: watermarks, alert fingerprints, instance snapshots, cost history, journal, unsent-report queue |
 | Model usage | None inside the monitor. Zero token spend when no findings |
@@ -124,7 +124,7 @@ Any peer can prompt the monitor by name; it answers without a model:
 | `unsuppress <pattern>` | Remove a ledger entry |
 
 ```
-ask monitor-aws-356994971776 to run-checks
+ask monitor-eu-oit-dev to run-checks
 ```
 
 ### Configuration

@@ -8,8 +8,7 @@ Day-to-day operation: starting peers, connecting to the deployed hub, addressing
 |------------|-----|
 | Two local peers, one machine | `just local-coms --name a` / `just local-coms --name b` |
 | Local hub plus networked peers | `just coms-net-server`, then `just coms --name dev --cname dev` |
-| Connect to the deployed hub | `./deploy/hostinger/connect.sh` |
-| Same, env only (no launch) | `source deploy/hostinger/connect.sh` |
+| Connect to the corp hub | SSM tunnel + token (see below) |
 | List every just recipe | `just` |
 
 Pi does not auto-load `.env`; the `just` recipes do (`set dotenv-load`). Running `pi` directly requires `source .env` first.
@@ -24,49 +23,59 @@ just coms --name dev --cname dev
 
 If the chosen name is already held by a live session, the hub assigns `name2` and the client adopts it -- check the widget or `coms_net_list` for the name you actually got. Peers address each other by exact name.
 
-## Connecting to the deployed hub
+## Connecting to the corp hub
+
+The hub is private; open an SSM port-forward first, then connect with your
+personal token (one name per person -- names are exclusive addresses):
 
 ```bash
-./deploy/hostinger/connect.sh
+# terminal 1 -- the tunnel (dies with the SSO session)
+aws ssm start-session --profile eu-shared-services-dev --region eu-central-1 \
+  --target <hub-instance-id> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8787"],"localPortNumber":["8787"]}'
+
+# terminal 2 -- the client
+export PI_COMS_NET_SERVER_URL=http://127.0.0.1:8787
+export PI_COMS_NET_AUTH_TOKEN=<your personal token>
+just coms --name <you> --cname <you>
 ```
 
-This fetches the hub token over SSH at run time (nothing lands on disk), fetches an OpenAI key only when the shell has none and `~/.pi/auth.json` is absent, prints current peers, and launches Pi as `laptop`. Override with `COMS_CNAME`, `COMS_PURPOSE`, `PI_MODEL`, or `VPS_HOST` (`deploy/hostinger/connect.sh:12-41`).
-
-Manual equivalent for any remote hub:
-
-```bash
-export PI_COMS_NET_SERVER_URL=https://coms.siobytes.cloud
-export PI_COMS_NET_AUTH_TOKEN=<token>
-just coms --name laptop --cname laptop
-```
+Operator sessions load `AGENTS.md` from the repo root -- the console scope
+and synthesis rules. Personal tokens come from the directory
+(`just token-create <principal> <names-csv>` for an admin; each operator
+self-fetches their own SSM parameter).
 
 ## Speaking to the fleet
 
 From any client session, natural language drives the tools:
 
-- "ask aws-356994971776 how many RDS instances it sees" -- the model calls `coms_net_send` to that peer and `coms_net_await` for the reply.
+- "ask eu-shared-services-dev how many RDS instances it sees" -- the model calls `coms_net_send` to that peer and `coms_net_await` for the reply.
 - "ask everyone to summarize their environment" -- `coms_net_broadcast` fans out and returns each reply under its peer name.
 
-Use an explicit verb ("ask ...", "send ... this:"). A bare `name:` prefix (`aws-356994971776: what is running?`) is interpreted by the model, not parsed by the extension -- and smaller models misread it as an *incoming* message from that peer and answer locally without sending anything. Two ways to confirm a message really went out: the `coms_net_send` tool call renders in your session, and the hub log shows a `laptop → <peer>` line. Real inbound messages always carry the marker `[inbound coms-net message from <name> @ <path>]`; text without that marker did not come from a peer.
+Use an explicit verb ("ask ...", "send ... this:"). A bare `name:` prefix (`eu-oit-dev: what is running?`) is interpreted by the model, not parsed by the extension -- and smaller models misread it as an *incoming* message from that peer and answer locally without sending anything. Two ways to confirm a message really went out: the `coms_net_send` tool call renders in your session, and the hub log shows a `laptop → <peer>` line. Real inbound messages always carry the marker `[inbound coms-net message from <name> @ <path>]`; text without that marker did not come from a peer.
 
 Replies to inbound messages are automatic: when a peer prompts your session, answer as a normal message. Never call `coms_net_send` to reply; the extension submits your turn output back to the caller.
 
 ### Durable sends
 
-`coms_net_send` accepts `ttl_ms`. Beyond the 30-minute default the message is queued durably for an offline peer name and delivered when that name next registers (capped at 7 days by the hub). Ask for it in natural language: "send aws-356994971776 a long-ttl message to run X when it comes back online".
+`coms_net_send` accepts `ttl_ms`. Beyond the 30-minute default the message is queued durably for an offline peer name and delivered when that name next registers (capped at 14 days by `PI_COMS_NET_MAX_TTL_MS`). Ask for it in natural language: "send eu-oit-dev a long-ttl message to run X when it comes back online".
 
 ## Talking to the monitor
 
-Each AWS account also runs a monitor peer, `monitor-aws-<account_id>`, registered `--explicit` -- invisible to `coms_net_list` and broadcasts unless you name it (or pass `include_explicit`). It answers a fixed command set without a model:
+Each AWS account also runs a monitor peer, `monitor-<alias>` (for example `monitor-eu-oit-dev`), registered `--explicit` -- invisible to `coms_net_list` and broadcasts unless you name it (or pass `include_explicit`). It answers a fixed command set without a model:
 
 ```
-ask monitor-aws-356994971776 to run-checks    # run the check families now
-... status                                    # liveness, last run, unsent reports
-... digest                                    # current daily digest on demand
-... history                                   # last findings (7 days)
+ask monitor-eu-oit-dev to run-checks     # run the check families now
+... status                               # liveness, last run, unsent reports
+... digest                               # current daily digest on demand
+... history                              # last findings (7 days)
+... suppressions                         # the suppression ledger
+... suppress <pattern> | <reason>        # accept a known gap (LIKE pattern on dedup keys)
+... unsuppress <pattern>                 # remove a ledger entry
 ```
 
-Its incident reports and daily digest arrive addressed to `laptop` (configurable via `PI_MONITOR_REPORT_TO`) with a long TTL: if no `laptop` session is connected, they wait in the hub mailbox and flush into your next session automatically. A quiet day still produces the digest -- silence past a day means the monitor itself is down. Details: [Monitoring](../architecture/monitoring.md).
+Its incident reports and daily digest go to the `ops` duty name (`PI_MONITOR_REPORT_TO`) with a long TTL: they wait in the hub mailbox and appear as quiet one-line notices when a session holding that name connects -- never as a model turn. A quiet day still produces the digest -- silence past a day means the monitor itself is down, and a `DEGRADED` digest header means some check families errored. Details: [Monitoring](../architecture/monitoring.md).
 
 Delivered reports stay readable: "show my inbox" or "show the ops inbox" calls `coms_net_inbox`, which lists retained mailbox messages non-destructively -- every operator sees the same history on demand, regardless of who received the push.
 
@@ -120,13 +129,16 @@ Hub-side variables are covered in [Networking](../architecture/networking.md#hub
 ## Watching a cloud agent
 
 ```bash
-# Attach to the remote agent's terminal
-herdr --remote piagent-vps          # VPS, needs an SSH alias for the piagent user
+# Attach to the remote agent's live terminal (SSH-over-SSM alias, user piagent)
+herdr --remote pi-eu-shared-services-dev
 
-aws ssm start-session --target <instance-id> --region us-east-1   # AWS
+# Or a plain shell on the host
+aws ssm start-session --target <instance-id> --region eu-central-1 --profile <profile>
 # then on the host:
 sudo -u piagent -i herdr
 ```
+
+Attach from a terminal outside any local Herdr session, treat the pane as read-only, and keep local and host Herdr versions matched.
 
 ## See Also
 

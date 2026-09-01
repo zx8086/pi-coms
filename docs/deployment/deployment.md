@@ -1,11 +1,14 @@
 # Deployment
 
-Deploys the pi-coms star topology: one zero-permission hub on the Hostinger VPS and one read-only Pi agent per AWS account. The hub relays messages; every agent registers with it by name over outbound HTTPS.
+Deploys the pi-coms star topology inside the corporate AWS estate: one
+zero-permission hub on a private EC2 host, and one read-only Pi agent (plus
+its monitor) per AWS account, all connected over the Transit Gateway with no
+public exposure anywhere.
 
 ```
-laptop pi ──────────┐
-aws-356994971776 ───┼──▶ hub (coms.siobytes.cloud)
-devops (VPS) ───────┘
+operator laptop (SSM tunnel / VPN) ──┐
+eu-shared-services-dev + monitor ────┼──▶ hub (private EC2, 10.34.89.51:8787)
+eu-oit-dev + monitor ────────────────┘        systemd unit coms-hub
 ```
 
 > For the networking and trust model behind these choices, see
@@ -16,158 +19,89 @@ devops (VPS) ───────┘
 
 | Component | Where it runs | Source |
 |-----------|---------------|--------|
-| Hub | Docker on the VPS, behind Traefik | `deploy/hub/Dockerfile`, `deploy/hostinger/docker-compose.yml` |
-| VPS agent (`devops`) | systemd on the VPS | `deploy/hostinger/bootstrap-agent.sh` |
+| Hub | Private EC2 in shared-services, systemd unit `coms-hub` | `deploy/modules/hub/` |
 | AWS agent (one per account) | EC2 via Terraform | `deploy/modules/agent/`, `deploy/accounts/<name>/` |
 | Account monitor (`pi-monitor.service`) | Same host as each agent | `scripts/coms-net-monitor.ts`, installed by the shared bootstrap |
-| Shared bootstrap | Both agent hosts | `deploy/bootstrap/agent-bootstrap.sh` |
+| Shared bootstrap | Every agent host | `deploy/bootstrap/agent-bootstrap.sh` |
+| Fleet distribution | S3 bucket in shared-services | `deploy/publish-fleet.sh`, State Manager convergence |
 
-All install and launch logic lives in the shared bootstrap. The AWS userdata shim (`deploy/modules/agent/userdata.sh.tftpl`) and the VPS shim (`deploy/hostinger/bootstrap-agent.sh`) only set the environment contract documented at the top of `deploy/bootstrap/agent-bootstrap.sh:12-34` and hand off.
+All install and launch logic lives in the shared bootstrap, parameterized by
+`SECRETS_SOURCE=aws|file`; the userdata shim only sets the environment
+contract documented at the top of `deploy/bootstrap/agent-bootstrap.sh` and
+hands off.
 
----
+## Accounts and roots
 
-## Hub on the VPS
+One Terraform root per account under `deploy/accounts/`, each with local
+state and gitignored tfvars:
 
-The hub is a single Bun container built from `deploy/hub/Dockerfile`. The server script is self-contained, so the image has no install step. It binds to `127.0.0.1:8787` on the host; Traefik (running with `network_mode: host`) terminates TLS for `coms.siobytes.cloud` with the existing `*.siobytes.cloud` wildcard certificate and proxies to loopback.
+| Root | Instantiates |
+|------|--------------|
+| `eu-shared-services-dev` | Hub (private IP pinned) + the local agent |
+| `eu-oit-dev` | Agent only, `hub_url` pointed at the hub's private IP |
 
-Deploy or update:
+Both roots use `lifecycle ignore_changes [ami]` and
+`user_data_replace_on_change = true`: **any userdata-affecting change
+replaces instances**. Always read the "forces replacement" lines of a plan.
+Per-host configuration that must not churn instances belongs in the
+bootstrap, not in terraform/userdata (for example `PI_MONITOR_REPORT_TO`).
 
-```bash
-# On the VPS. /srv/pi-coms holds copies of deploy/ and scripts/ from this repo.
-cd /srv/pi-coms/deploy/hostinger && docker compose up -d --build
-```
+## Code distribution: the fleet bundle
 
-One-time setup on a fresh VPS:
+Development stays on GitHub; fleet hosts never talk to it. Merges to `main`
+are published as a bundle to a versioned S3 bucket, and hosts converge from
+inside the network:
 
-```bash
-# 1. Hub token
-openssl rand -hex 32 | sed 's/^/PI_COMS_NET_AUTH_TOKEN=/' \
-  > /root/.secrets/server-siobytes-cloud/coms-net-hub.env
-chmod 600 /root/.secrets/server-siobytes-cloud/coms-net-hub.env
+| Stage | Mechanism |
+|-------|-----------|
+| Publish | `./deploy/publish-fleet.sh pi-coms-dist-<account> <profile>` uploads the archive + vendored deps next to a `version` file |
+| Authorize | Bucket policy scoped with `aws:PrincipalOrgID`; hosts read via an S3 gateway endpoint (no internet path for code) |
+| Converge | A State Manager association runs `pi-coms-update` every 30 min, comparing the S3 `version` to the local `.bundle-version` and swapping + restarting services on change |
+| Immediate rollout | `aws ssm send-command ... --parameters 'commands=["/usr/local/bin/pi-coms-update"]'` per host |
 
-# 2. Hub container
-cd /srv/pi-coms/deploy/hostinger && docker compose up -d --build
+`pi-coms-update` restarts `pi-monitor` (and `coms-hub` on the hub host) but
+leaves a live registered Pi agent alone. When `extensions/` changed, follow
+with the agent restart dance: `pkill -TERM -u piagent -f cli.js`, wait for
+the name to leave the registry, then `systemctl restart pi-agent` -- a bare
+unit restart sees "already registered" and leaves the old process running.
 
-# 3. Traefik route: merge deploy/hostinger/traefik-router.yml into
-#    /srv/traefik/dynamic/routers.yml (Traefik watches the directory).
+The daily digest carries the running `bundle:` version as the deploy canary,
+so a stale host is visible from the mailbox without an SSM round-trip.
 
-# 4. VPS agent
-REPO_URL=https://github.com/zx8086/pi-coms.git \
-  bash /srv/pi-coms/deploy/hostinger/bootstrap-agent.sh
-```
+## IAM and models
 
-Operating notes:
-
-1. **Do not scale past one replica.** The registry and Server-Sent Events (SSE) connections live in process memory; a second container splits the registry.
-2. **Restarting the hub clears the registry but not the mail.** Agents re-register on their next heartbeat (10 seconds); queued mailbox messages reload from sqlite on boot.
-3. The mailbox lives on the named volume `coms-hub-mail` (mounted at `/home/bun/.pi/coms-net`), so store-and-forward messages survive container recreation. The Dockerfile pre-creates the directory owned by `bun` -- without that the volume mounts root-owned and sqlite cannot create `messages.db`.
-4. The healthcheck polls `http://127.0.0.1:8787/health` every 30 seconds (`deploy/hostinger/docker-compose.yml`).
-
----
-
-## AWS agent per account
-
-`deploy/modules/agent/` is applied once per AWS account from a root under `deploy/accounts/`. It creates an EC2 host (Graviton, AL2023 arm64), an instance role, and two Secrets Manager secrets. The instance clones `repo_url` at boot and runs the shared bootstrap, so deployment changes must be pushed before an apply or reboot picks them up.
-
-### Adding an account
-
-1. Copy `deploy/accounts/eu-oit-dev` to `deploy/accounts/<name>`.
-2. Create `terraform.tfvars` (gitignored):
-
-```hcl
-aws_profile     = "<cli-profile>"
-repo_url        = "https://github.com/zx8086/pi-coms.git"
-coms_auth_token = "<hub token>"        # sourcing notes in accounts/eu-oit-dev/main.tf
-ssh_public_key  = "ssh-ed25519 ..."    # optional, enables herdr --remote
-subnet_id       = "subnet-..."         # optional, see Placement below
-instance_type   = "t4g.micro"          # optional, default t4g.small
-```
-
-3. `terraform init && terraform apply`.
-4. Populate the provider-keys secret and reboot is **not** enough on first boot (see Gotchas). For an already-bootstrapped host:
-
-```bash
-aws secretsmanager put-secret-value \
-  --secret-id pi-agent/agent-provider-keys \
-  --secret-string '{"OPENAI_API_KEY":"sk-..."}' --profile <name>
-aws ec2 reboot-instances --instance-ids <id> --profile <name>
-```
-
-5. The agent appears in `coms_net_list` as `aws-<account_id>`.
-
-### What the module creates
-
-| Resource | Purpose |
-|----------|---------|
-| `aws_instance.agent` | t4g host, public IP, egress-only security group |
-| `aws_iam_role.agent` | `ViewOnlyAccess` + `AmazonSSMManagedInstanceCore` + inline policies (CloudWatch/logs reads, `ce:GetCostAndUsage` for the monitor, boot secrets) |
-| `aws_secretsmanager_secret.coms_token` | Account-local copy of the hub token |
-| `aws_secretsmanager_secret.provider_keys` | Model provider API keys, created empty |
-| `aws_cloudwatch_metric_alarm.agent_status_check` | `StatusCheckFailed >= 1` for 2 min on the agent host; no actions -- the monitor reports its transitions |
-
-Source: `deploy/modules/agent/main.tf`.
-
-### Placement
-
-The module defaults to the default VPC's first default subnet. That subnet can sit in an Availability Zone without the chosen instance type (us-east-1e has no t4g capacity), which fails the apply. Pin `subnet_id` to a default subnet in a supported zone. Both `subnet_id` and `instance_type` pass through the account root (`deploy/accounts/eu-oit-dev/main.tf`).
-
-### Shell access
-
-No inbound ports exist. Use Session Manager, then attach to the agent's terminal:
-
-```bash
-aws ssm start-session --target <instance-id> --region <region>
-# on the host:
-sudo -u piagent -i herdr
-```
-
-With `ssh_public_key` set, `herdr --remote` over an SSM tunnel also works.
-
-### Running costs
-
-Fixed cost per account, us-east-1 on-demand at ~730 hours/month:
-
-| Item | Monthly |
-|------|---------|
-| EC2 t4g.micro | $6.13 |
-| EBS 30 GB gp3 root volume | $2.40 |
-| Public IPv4 address | $3.65 |
-| Secrets Manager (2 secrets) | $0.80 |
-| SSM, default CloudWatch metrics, data transfer | ~$0 |
-| Total | ~$13.00 |
-
-Each additional account adds the same amount. The default `instance_type` is t4g.small (~$12.26/mo for the instance alone); the retired poc account pinned t4g.micro via tfvars, which fit its workload (~400 MB used of 1 GB, CPU under 3% idle).
-
-Networking rounds to zero beyond the IPv4 address:
-
-1. **Egress is inside the free tier.** AWS charges internet egress at $0.09/GB after the first free 100 GB/month per account. The agent's chatter -- heartbeats every 10 seconds, kilobyte-scale prompts and replies -- totals well under 1 GB/month.
-2. **Ingress is always free**, which covers the SSE stream, keepalives, boot-time installs, and the repo clone.
-3. **In-region AWS API traffic is free** between EC2 and regional service endpoints.
-4. **The public IP replaces a NAT gateway.** Egress-only public IP costs $3.65/mo; a NAT gateway would cost ~$32/mo plus $0.045/GB processed for the same outbound-only role. There is no ALB or CloudFront either -- the hub's TLS lives on the VPS behind existing Traefik.
-
-Model usage is the variable cost and is metered separately: idle agents consume no tokens (heartbeats and SSE are plain HTTP), and cost accrues only per query against the provider key in the account's `pi-agent/agent-provider-keys` secret. The fleet key is dedicated, so the provider's usage dashboard for that key reads as exactly the fleet's spend.
-
----
+Corp agents run under the production incident analyzer's
+`DevOpsAgentReadOnly` role (both policy documents vendored verbatim in
+`deploy/modules/agent/policies/`), assumed by the instance role with an
+ExternalId. Named dev extensions live in the inline
+`pi-coms-dev-extensions` policy: Cost Explorer, Bedrock invoke, scheduling
+and history reads, log-content reads, certificate reads, and an explicit
+Deny on secret values and data-plane gets. Models run on Amazon Bedrock
+(`eu.anthropic.claude-sonnet-5`) under the same assumed role -- no API keys
+exist anywhere in the system. Details: [Security Model](../security/security-model.md).
 
 ## Boot sequence on an agent host
 
-Both shims converge on the same sequence in `deploy/bootstrap/agent-bootstrap.sh`:
-
 ```
-+-----------+   clone    +------------+   secrets   +------------+   systemd   +-----------+
-| shim sets | ---------> | install    | ----------> | write      | ----------> | herdr +   |
-| env       |  repo_url  | bun/pi/    |  aws|file   | ~/.coms-env|  units      | pi-agent  |
-| contract  |            | herdr      |             | (0600)     |             | services  |
-+-----------+            +------------+             +------------+             +-----------+
++-----------+   bundle    +------------+   secrets   +------------+   systemd   +-----------+
+| shim sets | ----------> | install    | ----------> | write      | ----------> | herdr +   |
+| env       |   from S3   | bun/pi/    |  aws|file   | ~/.coms-env|  units      | pi-agent, |
+| contract  |             | herdr      |             | (0600)     |             | pi-monitor|
++-----------+             +------------+             +------------+             +-----------+
 ```
 
-1. Install Bun, Pi, and Herdr for the `piagent` user. The `pi` launcher is replaced with a Bun wrapper because the hosts have no Node (`deploy/bootstrap/agent-bootstrap.sh:74-93`).
-2. Resolve secrets from Secrets Manager (`SECRETS_SOURCE=aws`) or env files (`SECRETS_SOURCE=file`) into `~/.coms-env`, mode 0600. Provider keys may be empty on first boot; the agent still registers.
-3. Install `herdr.service`, `pi-agent.service`, and `pi-monitor.service`. The launch script (`~/bin/start-pi-agent.sh`) waits for Herdr and the hub, closes stale workspaces, starts Pi in a headless Herdr pane, and confirms readiness against the hub registry rather than Herdr's own detection.
+1. Install Bun, Pi, and Herdr for the `piagent` user.
+2. Wait for STS (`sts get-caller-identity` poll) before the first
+   credentialed call -- first boot has an IMDS credential gap.
+3. Resolve secrets into `~/.coms-env`, mode 0600.
+4. Copy `deploy/AGENTS-spoke.md` into the clone as `AGENTS.override.md`
+   (agent hosts only) so spokes load the investigation discipline instead of
+   the repo's development instructions.
+5. Install `herdr.service`, `pi-agent.service`, `pi-monitor.service`. The
+   monitor is deliberately independent of the agent: a wedged agent never
+   stops detection.
 
-`pi-monitor.service` is deliberately independent of `pi-agent.service`: it runs `bun scripts/coms-net-monitor.ts` directly (no Herdr, no Pi), sources `~/.coms-env` at start, and restarts on failure. A wedged agent never stops detection. See [Monitoring](../architecture/monitoring.md).
-
-To update an already-running host (new code, new units, refreshed secrets) re-run the whole bootstrap idempotently over SSM:
+Re-run the whole bootstrap idempotently on a live host via SSM:
 
 ```bash
 aws ssm send-command --instance-ids <id> --region <region> --profile <name> \
@@ -175,48 +109,63 @@ aws ssm send-command --instance-ids <id> --region <region> --profile <name> \
   --parameters 'commands=["bash /var/lib/cloud/instance/user-data.txt"]'
 ```
 
-That re-clones the shim repo, pulls `~/pi-coms`, runs `bun install`, rewrites the units, and restarts the services. Remember the host pulls this repository's **default branch**: changes must be merged to `main` before they can reach an agent host.
+Hosts pull this repository's **default branch** bundle: changes must be
+merged to `main` and published before a boot or re-run picks them up.
 
 ### Gotchas
 
-1. **Do not reboot during first boot.** Userdata runs once per instance; a reboot mid-bootstrap leaves a half-installed host that never recovers on its own. Recreate instead: `terraform apply -replace=module.agent.aws_instance.agent`.
-2. **Secrets are read at bootstrap, not at service start.** `~/.coms-env` is written by the bootstrap only. Populating the provider-keys secret after boot requires re-running the bootstrap (or recreating the instance); a plain service restart reuses the stale env file.
-3. **The public IP changes on stop/start.** Irrelevant to function (the host is egress-only) but do not hard-code it anywhere.
-4. **Name collisions produce `name2`.** The hub appends a counter when a name is already held by a live session. The launch script guards against the common cause (stacked Herdr workspaces); if a name still sticks, restart the hub.
-
----
+1. **Do not reboot during first boot.** Userdata runs once; recreate instead
+   (`terraform apply -replace=...`).
+2. **SSM quoting.** For anything beyond a trivial command, write a script
+   locally, base64 it, and run
+   `echo <b64> | base64 -d > /tmp/x.sh && bash /tmp/x.sh`. `aws ssm wait
+   command-executed` gives up after ~100 s -- poll status in a loop for long
+   commands.
+3. **Terraform replacement trap.** Any userdata-affecting change replaces
+   instances (see Accounts and roots above).
+4. **Agent hosts need 2 GB of memory.** A 1 GB t4g.micro OOM-killed its
+   agent mid-investigation; hosts are t4g.small with a 2 GB swapfile
+   provisioned by the bootstrap.
+5. **Name collisions produce `name2`.** In directory-auth mode names are
+   bound to principals and squatting is rejected instead.
 
 ## Verifying a deployment
 
-```bash
-# Hub is up (no auth needed)
-curl -s https://coms.siobytes.cloud/health
-
-# Agent registered (token required)
-curl -s -H "Authorization: Bearer $PI_COMS_NET_AUTH_TOKEN" \
-  https://coms.siobytes.cloud/v1/agents
-```
-
-Expected: `/health` returns HTTP 200; the agents list contains `devops` and one `aws-<account_id>` entry per applied account. Monitors register `--explicit`, so add `?include_explicit=true` to also see each `monitor-aws-<account_id>`.
-
-On an agent host:
+The hub is private; verification runs over SSM.
 
 ```bash
-systemctl status herdr pi-agent pi-monitor
-journalctl -u pi-agent -f
-journalctl -u pi-monitor -f   # first line logs the registered name and cron cadences
-tail /var/log/pi-agent-bootstrap.log   # AWS hosts; ends with "bootstrap complete"
+# Per host: bundle version and services
+aws ssm send-command --instance-ids <id> --profile <profile> --region eu-central-1 \
+  --document-name AWS-RunShellScript \
+  --parameters 'commands=["cat /home/piagent/pi-coms/.bundle-version && systemctl is-active pi-agent pi-monitor herdr"]'
+
+# Monitor registered with its cadences (first log line)
+journalctl -u pi-monitor -n 40   # via an SSM shell on the host
+
+# Hub-side: monitors register --explicit and are hidden from /v1/agents;
+# their register lines are in the hub journal
+journalctl -u coms-hub           # on the hub host
 ```
 
-From any client session, `ask monitor-aws-<account_id> for status` should answer with its last run and unsent-report count without spending tokens on the monitor side.
+From an operator session, `ask monitor-<alias> for status` answers with its
+last run and unsent-report count without spending tokens on the monitor
+side; the daily digest in the `ops` inbox is the standing dead-man signal.
 
----
+## The deprecated VPS deployment
+
+The original hub ran in Docker behind Traefik on a Hostinger VPS
+(`deploy/hub/Dockerfile`, `deploy/hostinger/`), with a `devops` agent on the
+same host. That estate is DEPRECATED as of 2026-08-31: do not deploy to it.
+Two standing cautions while its pieces still exist: `/srv/pi-coms` on the
+VPS is a plain file copy inside another repo's checkout -- never run git
+there -- and hub deploys there were scp + `docker compose up -d --build`,
+not the S3 bundle flow.
 
 ## See Also
 
 - [System Overview](../architecture/overview.md)
 - [Networking](../architecture/networking.md)
 - [Monitoring](../architecture/monitoring.md) -- what `pi-monitor.service` does once installed
+- [Estate Watch](../architecture/estate-watch.md) -- the doctrine behind the monitor
 - [Security Model](../security/security-model.md)
 - [Usage](../development/usage.md)
-- `deploy/README.md` and `deploy/hostinger/README.md` for operator-focused runbooks
