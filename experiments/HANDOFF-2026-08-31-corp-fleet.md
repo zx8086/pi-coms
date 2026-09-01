@@ -140,6 +140,30 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
   bundle at `efdf522`, the export present, pi-monitor active and restarted
   21:50Z. Digests now wait durably in the hub mailbox for an `ops` session
   instead of depending on the laptop peer.
+- SIO-1588 implemented and DEPLOYED (Done): the whole diagnosis pipeline was
+  down -- every finding since 21:03Z undiagnosed in both accounts. Two faults:
+  the `response_schema` rode only in the sendMessage `details` (metadata the
+  model never sees; both agents guessed the same wrong reply shape), and the
+  flat 5-min await discarded completed work on big batches (19 findings).
+  Now the schema is appended to the inbound turn content and the await budget
+  scales base + 60 s/finding, capped 30 min (`investigateBudgetMs`, env-
+  tunable). PR #36, `b6ee517`. Deploy required the pkill agent-restart dance
+  on both hosts so the live Pis loaded the fixed extension.
+- SIO-1589 implemented and DEPLOYED (Done): the logs check had been dead in
+  corp since day one -- AccessDenied on `logs:FilterLogEvents`; the
+  log-content grants only existed in the legacy instance-role policy. New
+  `LogContentReads` in `pi-coms-dev-extensions` (applied both accounts,
+  verified empirically). Plus a relevance rework before the grant woke the
+  check up: WARN dropped from the filter, DescribeLogGroups paginated past
+  the silent 50-group alphabetical cutoff (cap 200, exclude prefixes), caps
+  of 3 signatures/group and 10 warn findings/cycle with overflow folded into
+  one uninvestigated info finding, journal pruned to 90 d at the daily tick.
+  PR #37, `347dbb5`.
+- END-TO-END PROOF 2026-09-01 03:36Z: the shared account's 03:30 cycle
+  produced 7 capped log findings WITH parsed diagnoses, zero check_error,
+  report mailed to ops; oit ran clean. First healthy monitor pipeline since
+  the corp deploy. (oit also confirmed the fix order: its 03:30 cycle ran
+  clean on IAM alone, before the code deploy landed there.)
 - Still open after tonight: next-steps items 3 (operator tunnel + session
   restart) and 4 (O4 security sign-off, O8 VPN CIDR, R1 Bedrock policy,
   R3 plain HTTP).
