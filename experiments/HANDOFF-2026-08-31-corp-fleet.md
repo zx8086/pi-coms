@@ -164,9 +164,27 @@ describe-scheduled-actions --service-namespace ecs` -> 50 actions,
   report mailed to ops; oit ran clean. First healthy monitor pipeline since
   the corp deploy. (oit also confirmed the fix order: its 03:30 cycle ran
   clean on IAM alone, before the code deploy landed there.)
+- SIO-1590 implemented and DEPLOYED (Done): the first night of the healthy
+  pipeline exposed two noise sources. F1, a self-amplifying loop in shared:
+  the monitor's own FilterLogEvents CloudTrail records land in
+  /aws/events/eventbridge-logs and matched the error pattern, and UUID middle
+  segments survived signature normalization so every event got a fresh dedup
+  key -- the last old-code cycle emitted a 129-signature overflow. Fixed by
+  normalizing UUIDs to `<uuid>` and excluding `/aws/events/` by default
+  (PI_MONITOR_LOGS_EXCLUDE overrides). F2: INSUFFICIENT_DATA alarm
+  transitions dropped from warn to info -- the nightly scale-to-zero flaps
+  dozens of alarms by design and each warn bought an agent investigation of a
+  metric gap (13- and 31-finding storms observed in oit). PR #39, `5f5d7b2`.
+  Live proof: first new-code cycle on shared ran findings 0, no check_error;
+  F2's proof is tonight's scale-to-zero arriving as info-only.
+- Findings for the OIT ACCOUNT OWNERS from the first diagnosed night:
+  localcore-service's nightlySyncVariantStock job gets HTTP 503 from
+  stock-service because the nightly cost schedule holds stock-service at
+  desiredCount 0 when the job runs -- a real cross-service scheduling
+  conflict, not monitor noise. Not yet passed along.
 - Still open after tonight: next-steps items 3 (operator tunnel + session
   restart) and 4 (O4 security sign-off, O8 VPN CIDR, R1 Bedrock policy,
-  R3 plain HTTP).
+  R3 plain HTTP), plus handing the oit finding above to its account owners.
 
 ## Gotchas (hard-won tonight, will bite again)
 
