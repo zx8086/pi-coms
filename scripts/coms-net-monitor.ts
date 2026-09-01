@@ -35,6 +35,22 @@ const CHECK_CRON = process.env.PI_MONITOR_CHECK_CRON ?? "*/15 * * * *";
 const DAILY_CRON = process.env.PI_MONITOR_DAILY_CRON ?? "@daily";
 const INVESTIGATE_TARGET = process.env.PI_MONITOR_INVESTIGATE_TARGET ?? `aws-${ACCOUNT_ID}`;
 const INVESTIGATE_TIMEOUT_MS = Number(process.env.PI_MONITOR_INVESTIGATE_TIMEOUT_MS ?? 300_000);
+const INVESTIGATE_PER_FINDING_MS = Number(
+	process.env.PI_MONITOR_INVESTIGATE_PER_FINDING_MS ?? 60_000,
+);
+const INVESTIGATE_MAX_MS = Number(process.env.PI_MONITOR_INVESTIGATE_MAX_MS ?? 1_800_000);
+
+// A flat await discards an agent's completed work whenever the batch is big
+// enough to outrun it (observed: 19 findings vs the 5-min default). Scale the
+// budget with the batch, capped so one huge batch cannot stall cycles all day.
+export function investigateBudgetMs(
+	findingCount: number,
+	baseMs = INVESTIGATE_TIMEOUT_MS,
+	perFindingMs = INVESTIGATE_PER_FINDING_MS,
+	maxMs = INVESTIGATE_MAX_MS,
+): number {
+	return Math.min(baseMs + perFindingMs * findingCount, maxMs);
+}
 const COST_PCT = Number(process.env.PI_MONITOR_COST_PCT ?? 20);
 const COST_ABS = Number(process.env.PI_MONITOR_COST_ABS ?? 1);
 const STATE_DB =
@@ -169,7 +185,7 @@ function main(): void {
 			const sent = await coms.send(INVESTIGATE_TARGET, prompt, {
 				response_schema: DIAGNOSIS_RESPONSE_SCHEMA,
 			});
-			const reply = await coms.awaitReply(sent.msg_id, INVESTIGATE_TIMEOUT_MS);
+			const reply = await coms.awaitReply(sent.msg_id, investigateBudgetMs(findings.length));
 			if (reply.error) return { diagnoses: null, failure: `agent reply error: ${reply.error}` };
 			if (reply.response == null) return { diagnoses: null, failure: "agent reply empty" };
 			const diagnoses = parseDiagnoses(reply.response);

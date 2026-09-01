@@ -1,6 +1,6 @@
 // tests/monitor-cycle.test.ts
 import { describe, expect, test } from "bun:test";
-import { makeGuard, runCycle, type CycleDeps } from "../scripts/coms-net-monitor.ts";
+import { investigateBudgetMs, makeGuard, runCycle, type CycleDeps } from "../scripts/coms-net-monitor.ts";
 import type { Finding } from "../scripts/monitor/report.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
@@ -148,4 +148,17 @@ test("investigation failure reason reaches the report", async () => {
 	});
 	await runCycle(d);
 	expect(d.sent[0]).toContain("uninvestigated: agent reply error: response not valid JSON");
+});
+
+describe("investigateBudgetMs", () => {
+	test("scales with the finding count from the base", () => {
+		expect(investigateBudgetMs(0, 300_000, 60_000, 1_800_000)).toBe(300_000);
+		expect(investigateBudgetMs(1, 300_000, 60_000, 1_800_000)).toBe(360_000);
+		expect(investigateBudgetMs(19, 300_000, 60_000, 1_800_000)).toBe(1_440_000);
+	});
+
+	test("caps at the max so a huge batch cannot stall cycles", () => {
+		expect(investigateBudgetMs(45, 300_000, 60_000, 1_800_000)).toBe(1_800_000);
+		expect(investigateBudgetMs(1_000, 300_000, 60_000, 1_800_000)).toBe(1_800_000);
+	});
 });
