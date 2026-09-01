@@ -53,6 +53,16 @@ export function investigateBudgetMs(
 }
 const COST_PCT = Number(process.env.PI_MONITOR_COST_PCT ?? 20);
 const COST_ABS = Number(process.env.PI_MONITOR_COST_ABS ?? 1);
+const LOGS_FILTER = process.env.PI_MONITOR_LOGS_FILTER; // check default applies when unset
+const LOGS_MAX_GROUPS = process.env.PI_MONITOR_LOGS_MAX_GROUPS
+	? Number(process.env.PI_MONITOR_LOGS_MAX_GROUPS)
+	: undefined;
+const LOGS_EXCLUDE = (process.env.PI_MONITOR_LOGS_EXCLUDE ?? "")
+	.split(",")
+	.map((s) => s.trim())
+	.filter(Boolean);
+const JOURNAL_RETAIN_MS =
+	Number(process.env.PI_MONITOR_JOURNAL_RETAIN_DAYS ?? 90) * 86_400_000;
 const STATE_DB =
 	process.env.PI_MONITOR_STATE_DB ?? path.join(os.homedir(), ".pi", "monitor", "state.db");
 
@@ -203,7 +213,15 @@ function main(): void {
 	const fifteenDeps: CycleDeps = {
 		checks: [
 			{ name: "alarms", run: () => checkAlarms(cw, state) },
-			{ name: "logs", run: () => checkLogs(logs, state) },
+			{
+				name: "logs",
+				run: () =>
+					checkLogs(logs, state, {
+						filterPattern: LOGS_FILTER,
+						maxGroups: LOGS_MAX_GROUPS,
+						excludePrefixes: LOGS_EXCLUDE,
+					}),
+			},
 			{ name: "drift", run: () => checkDrift(ec2, state) },
 		],
 		state,
@@ -248,6 +266,8 @@ function main(): void {
 			log,
 		};
 		await runCycle(costDeps);
+		const pruned = state.pruneJournal(JOURNAL_RETAIN_MS);
+		if (pruned > 0) log(`journal pruned: ${pruned} row(s) past retention`);
 		// The digest ships even when quiet; a missing digest is the dead-man signal.
 		const text = await buildDigest();
 		try {
