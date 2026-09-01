@@ -24,23 +24,19 @@ The hub is a single Bun HTTP server. Bind address and port come from the environ
 | `PI_COMS_NET_PORT` | `0` | `0` lets the OS claim a port; the claimed port lands in `server.json` |
 | `PI_COMS_NET_PUBLIC_URL` | local URL | Advertised to clients via `server.json` |
 
-In production the container binds `0.0.0.0:8787` inside its own network namespace, published only on host loopback (`127.0.0.1:8787`). Traefik runs with `network_mode: host`, so it reaches the hub over loopback and nothing else can (`deploy/hostinger/docker-compose.yml:24-25`).
+In the corp deployment the hub is a private EC2 host in shared-services (systemd unit `coms-hub`, pinned private IP, `http://10.34.89.51:8787`). It binds non-loopback with an explicit auth token; the security group admits TCP 8787 from allow-listed CIDRs only (the fleet VPCs, optionally a VPN range), and there is no public IP and no internet-gateway path -- the hub is unreachable from outside the corporate network.
 
 ```
-                     internet
-                        |
-                        v  443 (TLS, *.siobytes.cloud wildcard)
-              +--------------------+
-              |      Traefik       |  network_mode: host
-              +---------+----------+
-                        |  http://127.0.0.1:8787  (loopback only)
-                        v
-              +--------------------+
-              |      coms-hub      |  Docker, Bun
-              +--------------------+
+   operator laptop                    fleet VPCs (TGW-routed)
+        |                                     |
+        v  SSM port-forward (TLS)             v  TCP 8787, SG allow-list
+              +---------------------------------+
+              |    coms-hub (private EC2, Bun)  |
+              |    10.34.89.51:8787, systemd    |
+              +---------------------------------+
 ```
 
-Traefik terminates TLS for `coms.siobytes.cloud` and forwards plain HTTP to loopback (`deploy/hostinger/traefik-router.yml`). No basicAuth middleware sits in front: the hub authenticates `/v1/*` itself and `/health` is deliberately open for healthchecks.
+`/health` is deliberately open for healthchecks; every `/v1/*` route authenticates itself. Operators reach the hub through an SSM port-forward to localhost:8787 (TLS-wrapped, CloudTrail-audited) or, once the VPN CIDR is allow-listed, directly over the VPN.
 
 ---
 
@@ -61,7 +57,7 @@ A coms-net client finds its hub in one of two ways:
   "host": "127.0.0.1",
   "port": 52965,
   "local_url": "http://127.0.0.1:52965",
-  "public_url": "https://coms.siobytes.cloud",
+  "public_url": "http://10.34.89.51:8787",
   "started_at": "...",
   "server_id": "..."
 }
@@ -126,27 +122,26 @@ This channel is why every host only needs **outbound** connectivity. The hub nev
 
 ## Agent host networking (AWS)
 
-The EC2 host sits in a default-VPC public subnet with a public IP for egress and a security group with **no ingress rules** (`deploy/modules/agent/main.tf:41-54`). This trades a NAT gateway for a public IP that accepts nothing.
+Corp agent hosts sit in **private subnets** with no public IP; egress goes through the VPC's NAT gateway, code comes over an S3 gateway endpoint, and the hub is reached across the Transit Gateway. The security group has **no ingress rules** (`deploy/modules/agent/main.tf`); the module's `associate_public_ip` variable still supports the legacy public-subnet placement.
 
 | Direction | Traffic | Path |
 |-----------|---------|------|
-| Outbound | Hub registration, heartbeats, SSE (agent and monitor each hold one stream) | HTTPS to `coms.siobytes.cloud` |
-| Outbound | Boot-time installs, repo clone | HTTPS to bun.sh, GitHub, herdr.dev |
-| Outbound | Secrets, AWS API queries, monitor checks | HTTPS to regional AWS endpoints (Cost Explorer: us-east-1) |
+| Outbound | Hub registration, heartbeats, SSE (agent and monitor each hold one stream) | HTTP to the hub's private IP over the TGW |
+| Outbound | Boot-time runtime installs (Bun, Pi, Herdr) | HTTPS via NAT to bun.sh, npm, herdr.dev |
+| Outbound | Fleet bundle | S3 gateway endpoint (free, no internet path) |
+| Outbound | AWS API queries, monitor checks, Bedrock | HTTPS to regional AWS endpoints (Cost Explorer: us-east-1) |
 | Inbound | None | Shell access is SSM Session Manager (outbound-initiated) |
-
-The VPS agent short-circuits Traefik entirely and talks to the hub over loopback (`http://127.0.0.1:8787`), so it keeps working while the cert or router is being changed (`deploy/hostinger/bootstrap-agent.sh:39-41`).
 
 ## End-to-end path
 
 A prompt from the laptop to an AWS agent:
 
 ```
-laptop pi ---> https://coms.siobytes.cloud (Traefik:443)
-                 ---> http://127.0.0.1:8787 (hub)   POST /v1/messages
+laptop pi ---> http://127.0.0.1:8787 (SSM port-forward, TLS to AWS)
+                 ---> hub on 10.34.89.51:8787       POST /v1/messages
 hub ------------> SSE "prompt" event on the stream the
-                  AWS agent opened outbound            (no inbound to AWS)
-aws agent ------> POST /v1/messages/:id/response  ---> hub
+                  agent opened outbound over the TGW   (no inbound to agents)
+agent ---------> POST /v1/messages/:id/response  ---> hub
 hub ------------> SSE "response" event -------------> laptop pi
 ```
 

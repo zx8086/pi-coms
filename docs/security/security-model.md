@@ -5,23 +5,24 @@ What each component can do, what it cannot, and the controls at every boundary. 
 ## Trust boundaries
 
 ```
-+----------------+        bearer token         +----------------+
++----------------+     per-principal token     +----------------+
 |  any client    | --------------------------> |      hub       |
-|  (laptop pi)   |     TLS via Traefik         |  no AWS creds  |
+|  (laptop pi)   |  SSM tunnel (TLS) or TGW    |  no AWS creds  |
 +----------------+                             +-------+--------+
                                                        | SSE (outbound-opened)
                                                        v
                                                +----------------+
                                                |  AWS agent     |
-                                               |  ViewOnlyAccess|
+                                               | DevOpsAgent-   |
+                                               | ReadOnly       |
                                                +----------------+
 ```
 
-1. **Client to hub**: one shared bearer token over TLS. Anyone with the token can join the pool, list peers, and send prompts.
+1. **Client to hub**: a bearer token per principal (directory mode on the corp hub; a single shared token remains the default for local hubs). Operators reach the private hub through an SSM port-forward (TLS to the SSM service) or the corporate network; the hub is unreachable from the internet.
 2. **Hub to account**: none. The hub holds no cloud credentials; compromising it yields relay control, not account access.
-3. **Agent to account**: an EC2 instance role. What an agent can reveal about its account is bounded by IAM, not by prompt discipline.
+3. **Agent to account**: an assumed read-only role. What an agent can reveal about its account is bounded by IAM, not by prompt discipline.
 
-Every agent shares one token and one coms project; account isolation comes from names and IAM, not the namespace.
+All peers share one coms project; account isolation comes from names, name binding, and IAM, not the namespace.
 
 ## Hub authentication
 
@@ -53,43 +54,62 @@ Administration is `just token-create <principal> [names] [kind] [profile]` / `to
 
 | Host | Inbound surface | Justification |
 |------|----------------|---------------|
-| Hub container | Loopback only (`127.0.0.1:8787`); public entry via Traefik TLS | Nothing reaches the hub except through the TLS proxy |
+| Corp hub | TCP 8787 from allow-listed CIDRs only; no public IP, no internet path | Fleet VPCs reach it over the TGW; operators via SSM port-forward |
 | AWS agent | None (security group has no ingress) | Prompts arrive over the SSE stream the agent opened outbound |
-| VPS agent | Host's existing SSH only | Talks to the hub over loopback |
+| Local dev hub | Loopback by default; non-loopback binds require an explicit token | Development only |
 
 Shell access to AWS agents is SSM Session Manager -- no SSH keys, no open ports, IAM-audited. Optional `herdr --remote` requires an explicitly authorized public key and rides an SSM tunnel.
 
-## IAM: the agent role
+## IAM: the workload role (corp deployments)
 
-The role attached to each account's agent (`deploy/modules/agent/main.tf:83-127`):
+With `readonly_role = true` (the corp default), the instance role holds only
+host plumbing -- SSM core, its boot parameters, the distribution bucket, and
+one `sts:AssumeRole` -- and every AWS read the workload performs runs as an
+ExternalId-gated session of `DevOpsAgentReadOnly`, the production incident
+analyzer's role recreated per account from the same two vendored policy
+documents (`deploy/modules/agent/policies/`):
 
-| Policy | Scope |
-|--------|-------|
-| `ViewOnlyAccess` (managed) | Metadata-only reads. No `s3:GetObject`, no DynamoDB item reads, no secret values |
-| `AmazonSSMManagedInstanceCore` (managed) | Session Manager |
-| `read-agent-secrets` (inline) | `secretsmanager:GetSecretValue` on exactly its two boot secrets |
-| `cloudwatch-logs-read` (inline) | `cloudwatch:DescribeAlarms`, `DescribeAlarmHistory`, `logs:FilterLogEvents`, `GetLogEvents`, `StartQuery`, `GetQueryResults` |
-| `cost-explorer-read` (inline) | `ce:GetCostAndUsage`, for the monitor's daily cost check. Cost Explorer has no resource-level scoping |
+| Element | Content |
+|---------|---------|
+| `DevOpsAgentReadOnlyPermissions` | The prod base-read policy, verbatim: topology, compute, datastores, messaging, CloudWatch, name-scoped log content, Health/Config, CloudFormation, security/audit surfaces |
+| `DevOpsAgentReadOnlyTroubleshooting` | The prod deep-dive policy, verbatim: network-path drill-down, Reachability, DNS, KMS metadata, `cloudtrail:LookupEvents`, quotas, flow-log content |
+| `pi-coms-dev-extensions` (inline) | Named dev additions: `ce:GetCostAndUsage` (cost check), Bedrock invoke on Anthropic models, scheduling/history reads, `LogContentReads` (FilterLogEvents/GetLogEvents/StartQuery/GetQueryResults), `CertificateReads` (acm:List/DescribeCertificate for the cert-expiry check), and an explicit **Deny** on secret values, `kms:Decrypt`, SSM parameter values, `lambda:GetFunction`, and data-plane gets -- metadata-only made structural |
 
-`ViewOnlyAccess` was chosen over `ReadOnlyAccess` deliberately: the agent describes the environment; it does not read data. Widen deliberately, one named action at a time -- the CloudWatch inline policy is the model for how.
+One reviewed permission set governs both this fleet and the incident
+analyzer; every check, investigation read, and model call appears in
+CloudTrail as a `DevOpsAgentReadOnly` session, cleanly separated from host
+plumbing. Widen deliberately, one named action at a time, in the
+dev-extensions policy.
 
-Note the boundary the CloudWatch widening crossed: `logs:GetLogEvents` is a data-plane read, so application log content is now visible to the agent and to anyone who can prompt it. Keep that in mind before granting further data reads.
+Note the boundary the log widening crossed: `logs:GetLogEvents` is a
+data-plane read, so application log content is visible to the agent and to
+anyone who can prompt it. The explicit Deny keeps that the only data-plane
+surface.
 
-The monitor process (`pi-monitor.service`) runs under the same instance role and the same constraint: it detects and reports, never remediates. The role stays read-only.
+The monitor process (`pi-monitor.service`) runs under the same role and the
+same constraint: it detects and reports, never remediates. The role stays
+read-only. Doctrine: [Estate Watch](../architecture/estate-watch.md).
+
+### Legacy instance-role mode
+
+With `readonly_role = false` the module instead attaches everything directly
+to the instance role: `ViewOnlyAccess` + `AmazonSSMManagedInstanceCore` +
+inline `cloudwatch-logs-read`, `cost-explorer-read`, and boot-secret reads.
+Same read-only constraint, no assumed-role separation.
 
 ## Hub data at rest
 
-The mailbox changed the hub's storage posture. Message rows -- **including prompt and response bodies** -- persist in `~/.pi/coms-net/projects/<project>/messages.db` (a Docker named volume on the VPS) from creation until delivery plus sweep. For default sends that window is minutes; for mailbox sends it is up to `PI_COMS_NET_MAX_TTL_MS` (default 14 days). Terminal rows are deleted by the sweep, not retained.
+The mailbox changed the hub's storage posture. Message rows -- **including prompt and response bodies** -- persist in `~/.pi/coms-net/projects/<project>/messages.db` (a KMS-encrypted EBS volume on the corp hub) from creation until sweep. For default sends that window is minutes; mailbox-class messages are retained until their own TTL expires -- terminal rows included, because the retained rows ARE the durable inbox (`GET /v1/mailbox`), capped by `PI_COMS_NET_MAX_TTL_MS` (default 14 days).
 
-Consequences: compromising the hub host now yields recent and queued message content, not just live relay traffic. Treat the `coms-hub-mail` volume like the token file -- root-owned host storage on a box you already trust with TLS termination. Registry, streams, and awaiters remain memory-only.
+Consequences: compromising the hub host yields up to 14 days of message content, not just live relay traffic. Registry, streams, and awaiters remain memory-only.
 
 ## Secrets handling
 
 | Secret | At rest | In transit | Notes |
 |--------|---------|-----------|-------|
-| Hub token | VPS: `/root/.secrets/.../coms-net-hub.env` (0600); AWS: per-account Secrets Manager copy | Fetched over SSH (`connect.sh`) or via instance role at boot | Never in git; tfvars and state are gitignored |
-| Provider API keys | AWS: Secrets Manager, created empty by Terraform; VPS: `/root/.secrets` | Instance role fetch at bootstrap | Populated out of band so keys never land in Terraform state |
-| Agent env | `~/.coms-env`, mode 0600, owned by `piagent` | -- | Written once at bootstrap |
+| Hub/principal tokens | SSM `SecureString` parameters under `/pi-coms/auth/*` (and `/pi-coms-hub/auth-token` for the root token) | Instance role fetch at boot; operators self-fetch their own parameter | Printed once at creation; never in git, logs, or errors |
+| Provider API keys | None in the corp deployment -- models run on Bedrock under the assumed role | -- | The keys parameter exists for non-Bedrock deployments, populated out of band |
+| Agent env | `~/.coms-env`, mode 0600, owned by `piagent` | -- | Written by the bootstrap |
 
 Client-side, `safeError()` string-replaces the live token with `<redacted>` in any user-visible error (`extensions/coms-net.ts:498-503`), and tokens are never written to audit entries. Terraform state contains the hub token (it is a variable), which is why state stays local and gitignored per account.
 
@@ -115,8 +135,8 @@ In single-token mode there is no per-peer authorization: any token holder can pr
 
 ## Operational rules
 
-1. **Rotate the token by replacing it in the VPS env file, restarting the hub, and re-applying each account** (the module stores a per-account copy).
-2. **Never widen `ViewOnlyAccess` wholesale.** Add named actions to an inline policy, as the CloudWatch policy does.
+1. **Rotate tokens through the directory**: `just token-create` / `token-revoke` replace and evict per principal, live sessions included; the parameter path's IAM policy is the admin boundary and CloudTrail the audit.
+2. **Never widen the read surface wholesale.** Add named actions to the dev-extensions inline policy; the explicit Deny stays.
 3. **Keep the hub at one replica.** Splitting the registry is an availability problem, not a security one, but a split registry makes name-based addressing unreliable, and names are the addressing scheme.
 4. **Treat `terraform.tfstate` as secret material.** It contains the hub token.
 

@@ -5,12 +5,12 @@ pi-coms gives Pi Coding Agent instances peer-to-peer messaging. Two equal agents
 The repository holds two layers:
 
 1. **Extensions** (`extensions/`) -- standalone TypeScript files loaded into Pi via `-e`, implementing the two transports and their tool surfaces.
-2. **Deployment** (`deploy/`) -- a star topology: a zero-permission hub on a VPS and one read-only Pi agent per AWS account.
+2. **Deployment** (`deploy/`) -- a star topology: a zero-permission hub on a private EC2 host and one read-only Pi agent (plus its deterministic monitor) per AWS account.
 
 ```
-laptop pi ──────────┐
-aws-356994971776 ───┼──▶ hub (coms.siobytes.cloud, no AWS permissions)
-devops (VPS) ───────┘
+operator laptop ─────────┐
+eu-shared-services-dev ──┼──▶ hub (private EC2, no AWS permissions)
+eu-oit-dev ──────────────┘
 ```
 
 ## Components
@@ -21,8 +21,9 @@ devops (VPS) ───────┘
 | Networked client | `extensions/coms-net.ts` | HTTP + Server-Sent Events (SSE) client to a hub |
 | Hub | `scripts/coms-net-server.ts` | Bun HTTP server; in-memory registry, message relay, sqlite mailbox for store-and-forward |
 | Monitor | `scripts/coms-net-monitor.ts` + `scripts/monitor/` | Per-host AWS checks on `Bun.cron`; reports via the mailbox (see [Monitoring](monitoring.md)) |
-| Shared bootstrap | `deploy/bootstrap/agent-bootstrap.sh` | Installs and launches a cloud agent and its monitor; shared by AWS and VPS |
-| Agent module | `deploy/modules/agent/` | Terraform: one EC2 agent per AWS account |
+| Shared bootstrap | `deploy/bootstrap/agent-bootstrap.sh` | Installs and launches a cloud agent and its monitor, parameterized by `SECRETS_SOURCE=aws\|file` |
+| Agent module | `deploy/modules/agent/` | Terraform: one EC2 agent per AWS account, `DevOpsAgentReadOnly` workload role |
+| Hub module | `deploy/modules/hub/` | Terraform: the private hub host, SG-scoped ingress, systemd unit |
 | Theme module | `extensions/themeMap.ts` | Shared helper (not an extension); per-extension theme and title defaults |
 
 ## Design principles
@@ -71,6 +72,7 @@ Extensions are standalone `.ts` files loaded from source through Pi's jiti runti
 - [Communication](communication.md) -- tool surface and message lifecycle
 - [Networking](networking.md) -- listeners, discovery, and the wire path
 - [Monitoring](monitoring.md) -- the AWS account monitor and the hub mailbox
+- [Estate Watch](estate-watch.md) -- the periodic-watch doctrine the monitor implements
 - [Security Model](../security/security-model.md)
 - [Deployment](../deployment/deployment.md)
 - [Usage](../development/usage.md)
