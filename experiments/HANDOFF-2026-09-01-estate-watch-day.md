@@ -70,6 +70,27 @@ artifact has standing style rules now (no SIO-* ids, no storytelling).
    style rules (memory `artifact-no-ticket-refs`): present-state only, no
    SIO-* ids, no storytelling, no closed risks; instruction-layering shown as
    two rows (spokes `AGENTS.override.md`, operators `AGENTS.md`).
+6. Artifact restructured (evening session, same url):
+   - Content additions from today's merges: WAF/firehose reads in the
+     dev-extensions IAM row, denied-log-group scoping + identifier-token
+     normalization in the logs-check row, per-family check-error count in the
+     digest description, `suppress <pattern> | <reason>` syntax in the Estate
+     Watch row.
+   - Verdict box merged into the header summary paragraph; the standalone
+     callout is gone.
+   - ALL aside/commentary paragraphs removed (token-spend consequence,
+     access-method default, inbox semantics, IAM payoff, model default,
+     one-flow/rollback, honest boundary, concurrency, sign-off). Facts not
+     stated elsewhere moved into the adjacent tables: security sign-off as an
+     open-items row, `AWS_PROFILE` operator access as a Bedrock row, Rollback
+     and Outside-the-bundle as update-stage rows, single-instance hub into the
+     mailbox note.
+   - Full-page storytelling pass: rationale clauses, metaphors, temporal
+     phrases (exactly as today / New / still / day one), emphasis words
+     (critically, full stop), editorial asides all removed. Access-method
+     badges now read "default" (A) and "pending O8" (B).
+   - Layout: `p { max-width: 70ch }` removed so paragraphs span the same
+     880px column as the tables.
 
 ## Next steps
 
@@ -94,7 +115,10 @@ artifact has standing style rules now (no SIO-* ids, no storytelling).
 
 - The artifact style rules are operator-mandated: present state only, no
   ticket ids, no incident anecdotes ("agents need 2 GB", not the OOM story).
-  Dates only as status/disposition records.
+  Dates only as status/disposition records. Extended 2026-09-01 evening: no
+  aside/commentary paragraphs at all -- facts live in the tables or section
+  intros; no rationale clauses, metaphors, temporal phrases, or emphasis
+  words; body text same width as tables.
 - The operator prefers the explicit `--target <hub-instance-id>` tunnel
   command in docs; `just hub-tunnel` exists but is deliberately not the
   documented path. Hub instance id is found via `tag:Name=pi-coms-hub-hub`.
