@@ -103,6 +103,12 @@ export class MonitorState {
 			: this.db.query("SELECT ts, kind, payload FROM journal WHERE ts_ms >= ? ORDER BY id ASC").all(cutoff);
 		return rows as any[];
 	}
+	// History is kept, not hoarded: findings older than the retention window
+	// stop informing anything and only grow the db.
+	pruneJournal(retainMs: number): number {
+		const cutoff = Date.now() - retainMs;
+		return this.db.query("DELETE FROM journal WHERE ts_ms < ?").run(cutoff).changes;
+	}
 	priorIncidents(resource: string, limit: number): { ts: string; payload: string }[] {
 		return this.db.query(
 			"SELECT ts, payload FROM journal WHERE kind = 'finding' AND payload LIKE '%' || ? || '%' ORDER BY id DESC LIMIT ?",

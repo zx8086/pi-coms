@@ -70,3 +70,57 @@ describe("checkLogs", () => {
 		expect(out).toHaveLength(0);
 	});
 });
+
+describe("checkLogs relevance caps", () => {
+	const now = 1_000_000_000_000;
+	const ev = (msg: string, i = 0) => ({ timestamp: now - 60_000 + i, message: msg });
+
+	test("excluded prefixes are never scanned", async () => {
+		const state = new MonitorState(":memory:");
+		const client = fakeClient(["/aws/codebuild/x", "/aws/app"], {
+			"/aws/codebuild/x": [ev("ERROR noisy build")],
+			"/aws/app": [ev("ERROR real problem")],
+		});
+		const out = await checkLogs(client, state, { now, excludePrefixes: ["/aws/codebuild/"] });
+		expect(out).toHaveLength(1);
+		expect(out[0].resource).toBe("/aws/app");
+	});
+
+	test("per-group cap keeps loudest signatures, folds the rest into one info overflow", async () => {
+		const state = new MonitorState(":memory:");
+		const events = [
+			ev("ERROR alpha broke", 1), ev("ERROR alpha broke", 2), ev("ERROR alpha broke", 3),
+			ev("ERROR beta broke", 4), ev("ERROR beta broke", 5),
+			ev("ERROR gamma broke", 6), ev("ERROR gamma broke", 7),
+			ev("ERROR delta broke", 8),
+			ev("ERROR epsilon broke", 9),
+		];
+		const client = fakeClient(["/aws/app"], { "/aws/app": events });
+		const out = await checkLogs(client, state, { now, maxSigsPerGroup: 3 });
+		const warns = out.filter((f) => f.severity === "warn");
+		const infos = out.filter((f) => f.severity === "info");
+		expect(warns).toHaveLength(3);
+		expect((warns[0].evidence as any).count).toBe(3); // loudest first
+		expect(infos).toHaveLength(1);
+		expect((infos[0].evidence as any).overflow).toHaveLength(2);
+	});
+
+	test("per-cycle cap bounds warn findings across groups", async () => {
+		const state = new MonitorState(":memory:");
+		const groups = ["/g1", "/g2", "/g3"];
+		const byGroup: Record<string, { timestamp: number; message: string }[]> = {};
+		for (const g of groups) byGroup[g] = [ev(`ERROR ${g} one`), ev(`ERROR ${g} two x`)];
+		const client = fakeClient(groups, byGroup);
+		const out = await checkLogs(client, state, { now, maxFindingsPerCycle: 4 });
+		expect(out.filter((f) => f.severity === "warn")).toHaveLength(4);
+		expect(out.filter((f) => f.severity === "info")).toHaveLength(1);
+	});
+
+	test("default filter pattern excludes WARN", async () => {
+		const state = new MonitorState(":memory:");
+		const client = fakeClient(["/aws/app"], { "/aws/app": [ev("ERROR x")] });
+		await checkLogs(client, state, { now });
+		const filterCall = client.calls.find((c: any) => c.constructor.name === "FilterLogEventsCommand");
+		expect(filterCall.input.filterPattern).toBe("?ERROR ?Exception");
+	});
+});

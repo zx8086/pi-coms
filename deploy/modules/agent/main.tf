@@ -265,6 +265,21 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
         ]
         Resource = "*"
       }],
+      // Log-content reads for the monitor's ERROR-log check and the agent's
+      // log-reading during diagnosis (SIO-1589). A deliberate widening of the
+      // metadata-only posture -- log lines can contain app-printed secrets --
+      // mirroring the named widening the legacy instance-role model made.
+      [{
+        Sid    = "LogContentReads"
+        Effect = "Allow"
+        Action = [
+          "logs:FilterLogEvents",
+          "logs:GetLogEvents",
+          "logs:StartQuery",
+          "logs:GetQueryResults",
+        ]
+        Resource = "*"
+      }],
       // Metadata-only made structural: an explicit Deny on secret values,
       // decryption, data-plane reads, and the presigned code URL. Explicit
       // deny beats any current or future Allow on this role.
