@@ -72,6 +72,20 @@ describe("report", () => {
 	});
 });
 
+test("digest names the failing check family next to the error count", () => {
+	const text = formatDigest({
+		accountId: "111122223333",
+		since: "2026-08-31T00:00:00Z",
+		findingCounts: {},
+		checkErrors: 26,
+		checkErrorsByCheck: { logs: 26 },
+		activeAlarms: [],
+		yesterdayUsd: null,
+		baselineUsd: null,
+	});
+	expect(text).toContain("check errors: 26 (logs=26)");
+});
+
 test("digest flags DEGRADED in the header when checks errored", () => {
 	const text = formatDigest({
 		accountId: "111122223333",

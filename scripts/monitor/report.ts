@@ -107,6 +107,7 @@ export type DigestInput = {
 	since: string;
 	findingCounts: Record<string, number>;
 	checkErrors: number;
+	checkErrorsByCheck?: Record<string, number>;
 	activeAlarms: string[];
 	yesterdayUsd: number | null;
 	baselineUsd: number | null;
@@ -129,7 +130,14 @@ export function formatDigest(d: DigestInput): string {
 		const parts = Object.entries(d.findingCounts).map(([k, v]) => `${k}=${v}`).join(" ");
 		lines.push(`- findings: ${total} (${parts})`);
 	}
-	lines.push(`- check errors: ${d.checkErrors}`);
+	// DEGRADED must be self-explanatory from the mailbox: name the failing
+	// family, not just the count.
+	const byCheck = Object.entries(d.checkErrorsByCheck ?? {});
+	lines.push(
+		byCheck.length > 0
+			? `- check errors: ${d.checkErrors} (${byCheck.map(([k, v]) => `${k}=${v}`).join(" ")})`
+			: `- check errors: ${d.checkErrors}`,
+	);
 	lines.push(
 		d.activeAlarms.length === 0
 			? "- alarms: none in ALARM"
