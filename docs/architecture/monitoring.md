@@ -76,7 +76,7 @@ All checks are deterministic AWS SDK calls under the instance role, with clients
 
 | Check | Cadence | Logic | Dedup |
 |-------|---------|-------|-------|
-| Alarms | 15 min | `DescribeAlarms`; transitions into ALARM (critical) / INSUFFICIENT_DATA (warn), recovery to OK (info) | Alarm name + state: a still-firing alarm alerts once, and only a state change re-arms it |
+| Alarms | 15 min | `DescribeAlarms`; transitions into ALARM (critical) / INSUFFICIENT_DATA (info -- nightly scale-to-zero flaps these by design), recovery to OK (info) | Alarm name + state: a still-firing alarm alerts once, and only a state change re-arms it |
 | Log errors | 15 min | `FilterLogEvents` since a per-group watermark, pattern `?ERROR ?Exception`, grouped by a normalized message signature; capped at 3 signatures/group and 10 warn findings/cycle, overflow journaled as one info finding | Group + signature hash; re-alerts after 24 h |
 | Drift/health | 15 min | Instance state changes vs the stored snapshot (stop/terminate = warn), failed status checks | Edge-triggered by the snapshot diff; status-check fingerprints clear on recovery |
 | Cost | daily | Yesterday vs the trailing 14-day baseline; alerts only when over by **both** +20% and +$1 | Once per date |
@@ -130,7 +130,7 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | `PI_MONITOR_INVESTIGATE_MAX_MS` | `1800000` (30 min) | Deadline cap regardless of batch size |
 | `PI_MONITOR_LOGS_FILTER` | `?ERROR ?Exception` | CloudWatch filter pattern (WARN deliberately absent) |
 | `PI_MONITOR_LOGS_MAX_GROUPS` | `200` | Log-group scan cap (paginated, alphabetical) |
-| `PI_MONITOR_LOGS_EXCLUDE` | empty | Comma-separated log-group name prefixes to skip |
+| `PI_MONITOR_LOGS_EXCLUDE` | `/aws/events/` (check default) | Comma-separated log-group name prefixes to skip; setting it replaces the default |
 | `PI_MONITOR_JOURNAL_RETAIN_DAYS` | `90` | Journal history retention, pruned at the daily tick |
 | `PI_MONITOR_COST_PCT` / `PI_MONITOR_COST_ABS` | `20` / `1` | Cost anomaly double threshold |
 | `PI_MONITOR_STATE_DB` | `~/.pi/monitor/state.db` | State location |

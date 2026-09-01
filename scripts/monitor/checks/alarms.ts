@@ -39,7 +39,11 @@ export async function checkAlarms(client: AwsClient, state: MonitorState): Promi
 		state.markAlerted(key, "alarm");
 		findings.push({
 			family: "alarm",
-			severity: sv === "ALARM" ? "critical" : "warn",
+			// INSUFFICIENT_DATA is info: nightly scale-to-zero flaps dozens of
+			// alarms into it by design, and a warn here buys an agent
+			// investigation of a metric gap. Journaled and reported, never
+			// investigated.
+			severity: sv === "ALARM" ? "critical" : "info",
 			resource: name,
 			summary: `Alarm ${name} entered ${sv}`,
 			dedup_key: key,

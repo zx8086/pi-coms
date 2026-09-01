@@ -124,3 +124,28 @@ describe("checkLogs relevance caps", () => {
 		expect(filterCall.input.filterPattern).toBe("?ERROR ?Exception");
 	});
 });
+
+describe("checkLogs noise controls (SIO-1590)", () => {
+	const now = 1_000_000_000_000;
+
+	test("UUIDs normalize to a stable signature", () => {
+		const a = logSignature('{"id":"d41c3231-612b-fc56-b455-b41b62a98d89","detail-type":"AWS API Call"} ERROR');
+		const b = logSignature('{"id":"bd1480c6-3363-32ba-2d95-53a9b323fded","detail-type":"AWS API Call"} ERROR');
+		expect(a).toBe(b);
+	});
+
+	test("/aws/events/ groups are excluded by default; explicit opt-in overrides", async () => {
+		const events = [{ timestamp: now - 60_000, message: "ERROR delivery echo" }];
+		const groups = ["/aws/events/eventbridge-logs"];
+		const byGroup = { "/aws/events/eventbridge-logs": events };
+
+		const out = await checkLogs(fakeClient(groups, byGroup), new MonitorState(":memory:"), { now });
+		expect(out).toHaveLength(0);
+
+		const optIn = await checkLogs(fakeClient(groups, byGroup), new MonitorState(":memory:"), {
+			now,
+			excludePrefixes: [],
+		});
+		expect(optIn).toHaveLength(1);
+	});
+});
