@@ -72,6 +72,51 @@ describe("report", () => {
 	});
 });
 
+test("digest flags DEGRADED in the header when checks errored", () => {
+	const text = formatDigest({
+		accountId: "111122223333",
+		since: "2026-08-31T00:00:00Z",
+		findingCounts: {},
+		checkErrors: 3,
+		activeAlarms: [],
+		yesterdayUsd: null,
+		baselineUsd: null,
+	});
+	expect(text.split("\n")[0]).toContain("[warn]");
+	expect(text.split("\n")[0]).toContain("DEGRADED: 3 check error(s)");
+});
+
+test("digest carries the bundle canary and suppressed count", () => {
+	const text = formatDigest({
+		accountId: "111122223333",
+		since: "2026-08-31T00:00:00Z",
+		findingCounts: {},
+		checkErrors: 0,
+		activeAlarms: [],
+		yesterdayUsd: null,
+		baselineUsd: null,
+		bundleVersion: "5f5d7b2",
+		suppressedCount: 4,
+	});
+	expect(text).toContain("bundle: 5f5d7b2");
+	expect(text).toContain("suppressed by ledger: 4");
+	const unknown = formatDigest({
+		accountId: "111122223333",
+		since: "2026-08-31T00:00:00Z",
+		findingCounts: {},
+		checkErrors: 0,
+		activeAlarms: [],
+		yesterdayUsd: null,
+		baselineUsd: null,
+	});
+	expect(unknown).toContain("bundle: unknown");
+});
+
+test("incident report footnotes the suppressed count", () => {
+	const text = formatIncidentReport("111122223333", [{ finding, diagnosis: null }], null, 2);
+	expect(text).toContain("suppressed: 2 finding(s) matching the ledger");
+});
+
 test("uninvestigated marker carries the concrete failure reason when known", () => {
 	const text = formatIncidentReport(
 		"111122223333",

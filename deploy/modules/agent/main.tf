@@ -265,6 +265,17 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
         ]
         Resource = "*"
       }],
+      // Certificate expiry is a fully predictable outage; the monitor's daily
+      // cert check (SIO-1591) makes it a non-event. Read-only metadata.
+      [{
+        Sid    = "CertificateReads"
+        Effect = "Allow"
+        Action = [
+          "acm:ListCertificates",
+          "acm:DescribeCertificate",
+        ]
+        Resource = "*"
+      }],
       // Log-content reads for the monitor's ERROR-log check and the agent's
       // log-reading during diagnosis (SIO-1589). A deliberate widening of the
       // metadata-only posture -- log lines can contain app-printed secrets --

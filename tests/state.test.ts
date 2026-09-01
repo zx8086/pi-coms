@@ -66,6 +66,27 @@ describe("MonitorState", () => {
 	});
 });
 
+describe("suppression ledger", () => {
+	test("LIKE patterns match dedup keys with wildcards", () => {
+		const s = new MonitorState(":memory:");
+		s.addSuppression("alarm:%-Utilization-Low-20%", "accepted rightsizing noise");
+		const m = s.matchSuppression("alarm:svc-a-Utilization-Low-20:ALARM");
+		expect(m?.reason).toBe("accepted rightsizing noise");
+		expect(s.matchSuppression("alarm:cpu-high:ALARM")).toBeNull();
+	});
+
+	test("add is upsert, remove reports whether anything matched", () => {
+		const s = new MonitorState(":memory:");
+		s.addSuppression("logs:/ecs/app:%", "first");
+		s.addSuppression("logs:/ecs/app:%", "updated");
+		expect(s.listSuppressions()).toHaveLength(1);
+		expect(s.listSuppressions()[0].reason).toBe("updated");
+		expect(s.removeSuppression("logs:/ecs/app:%")).toBe(true);
+		expect(s.removeSuppression("logs:/ecs/app:%")).toBe(false);
+		expect(s.matchSuppression("logs:/ecs/app:abc")).toBeNull();
+	});
+});
+
 test("pruneJournal removes only rows past retention", () => {
 	const s = new MonitorState(":memory:");
 	s.journal("finding", { old: true });

@@ -16,6 +16,7 @@ export class MonitorState {
 			CREATE TABLE IF NOT EXISTS costs (date TEXT PRIMARY KEY, usd REAL NOT NULL);
 			CREATE TABLE IF NOT EXISTS journal (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, ts_ms INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL);
 			CREATE TABLE IF NOT EXISTS unsent (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, prompt TEXT NOT NULL, ttl_ms INTEGER NOT NULL, created_at TEXT NOT NULL);
+			CREATE TABLE IF NOT EXISTS suppressions (pattern TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at TEXT NOT NULL);
 		`);
 	}
 	close(): void {
@@ -113,6 +114,29 @@ export class MonitorState {
 		return this.db.query(
 			"SELECT ts, payload FROM journal WHERE kind = 'finding' AND payload LIKE '%' || ? || '%' ORDER BY id DESC LIMIT ?",
 		).all(resource, limit) as any[];
+	}
+
+	// The known-gap ledger: operator-accepted imperfections stop re-raising as
+	// fresh findings. Patterns are SQL LIKE against dedup_key ("%" wildcards),
+	// so one entry can cover a family (e.g. "alarm:%-Utilization-Low-20%").
+	addSuppression(pattern: string, reason: string): void {
+		this.db.query(
+			"INSERT INTO suppressions (pattern, reason, created_at) VALUES (?, ?, ?) ON CONFLICT(pattern) DO UPDATE SET reason = excluded.reason",
+		).run(pattern, reason, new Date().toISOString());
+	}
+	removeSuppression(pattern: string): boolean {
+		return this.db.query("DELETE FROM suppressions WHERE pattern = ?").run(pattern).changes > 0;
+	}
+	listSuppressions(): { pattern: string; reason: string; created_at: string }[] {
+		return this.db.query(
+			"SELECT pattern, reason, created_at FROM suppressions ORDER BY created_at ASC",
+		).all() as any[];
+	}
+	matchSuppression(dedupKey: string): { pattern: string; reason: string } | null {
+		const r = this.db.query(
+			"SELECT pattern, reason FROM suppressions WHERE ? LIKE pattern LIMIT 1",
+		).get(dedupKey) as any;
+		return r ? { pattern: r.pattern, reason: r.reason } : null;
 	}
 
 	queueUnsent(target: string, prompt: string, ttlMs: number): void {

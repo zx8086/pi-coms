@@ -3,7 +3,17 @@ import { z } from "zod";
 
 export const SeveritySchema = z.enum(["info", "warn", "critical"]);
 export type Severity = z.infer<typeof SeveritySchema>;
-export const FamilySchema = z.enum(["alarm", "logs", "drift", "cost"]);
+export const FamilySchema = z.enum([
+	"alarm",
+	"logs",
+	"drift",
+	"cost",
+	"identity",
+	"ingestion",
+	"trail",
+	"cert",
+	"watchlist",
+]);
 export type Family = z.infer<typeof FamilySchema>;
 
 export const FindingSchema = z.object({
@@ -66,6 +76,7 @@ export function formatIncidentReport(
 	accountId: string,
 	items: { finding: Finding; diagnosis: Diagnosis | null }[],
 	investigationFailure?: string | null,
+	suppressedCount = 0,
 ): string {
 	const sorted = [...items].sort(
 		(a, b) => SEV_ORDER[a.finding.severity] - SEV_ORDER[b.finding.severity],
@@ -85,6 +96,9 @@ export function formatIncidentReport(
 		}
 		lines.push(`  evidence: ${JSON.stringify(finding.evidence)}`);
 	}
+	if (suppressedCount > 0) {
+		lines.push("", `suppressed: ${suppressedCount} finding(s) matching the ledger (journaled, not investigated)`);
+	}
 	return lines.join("\n");
 }
 
@@ -96,11 +110,19 @@ export type DigestInput = {
 	activeAlarms: string[];
 	yesterdayUsd: number | null;
 	baselineUsd: number | null;
+	bundleVersion?: string | null;
+	suppressedCount?: number;
 };
 
 export function formatDigest(d: DigestInput): string {
 	const total = Object.values(d.findingCounts).reduce((a, b) => a + b, 0);
-	const lines: string[] = [`[info] aws-${d.accountId} daily digest (since ${d.since})`, ""];
+	// A green digest produced while checks errored is a lie: degradation is
+	// the headline, not a line item.
+	const header =
+		d.checkErrors > 0
+			? `[warn] aws-${d.accountId} daily digest DEGRADED: ${d.checkErrors} check error(s) (since ${d.since})`
+			: `[info] aws-${d.accountId} daily digest (since ${d.since})`;
+	const lines: string[] = [header, ""];
 	if (total === 0) {
 		lines.push("- findings: no findings in the last 24h");
 	} else {
@@ -119,5 +141,9 @@ export function formatDigest(d: DigestInput): string {
 	} else {
 		lines.push("- spend: no cost data yet");
 	}
+	if ((d.suppressedCount ?? 0) > 0) lines.push(`- suppressed by ledger: ${d.suppressedCount}`);
+	// Deploy canary: a stale bundle silently drops capabilities; the digest is
+	// where the operator sees the version without an SSM round-trip.
+	lines.push(`- bundle: ${d.bundleVersion ?? "unknown"}`);
 	return lines.join("\n");
 }

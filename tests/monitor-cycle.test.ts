@@ -106,6 +106,86 @@ describe("runCycle", () => {
 		await runCycle(d);
 		expect(d.sent).toHaveLength(0);
 	});
+
+	test("an unhealthy gate skips the checks and reports only the gate finding", async () => {
+		let checksRan = false;
+		const gateFinding = F({
+			family: "identity",
+			dedup_key: "identity:error",
+			summary: "Identity check failed: ExpiredToken",
+		});
+		const d = deps({
+			gate: { name: "identity", run: async () => ({ findings: [gateFinding], healthy: false }) },
+			checks: [
+				{
+					name: "alarms",
+					run: async () => {
+						checksRan = true;
+						return [F()];
+					},
+				},
+			],
+		});
+		const out = await runCycle(d);
+		expect(checksRan).toBe(false);
+		expect(out.findings).toHaveLength(1);
+		expect(out.findings[0].family).toBe("identity");
+		expect(d.sent[0]).toContain("Identity check failed");
+	});
+
+	test("a healthy gate lets the checks run", async () => {
+		const d = deps({ gate: { name: "identity", run: async () => ({ findings: [], healthy: true }) } });
+		const out = await runCycle(d);
+		expect(out.findings).toHaveLength(1);
+	});
+
+	test("a throwing gate is a check error, not a skip", async () => {
+		const d = deps({
+			gate: {
+				name: "identity",
+				run: async () => {
+					throw new Error("sdk bug");
+				},
+			},
+		});
+		const out = await runCycle(d);
+		expect(out.findings).toHaveLength(1);
+		expect(d.state.journalRows(60_000, "check_error")).toHaveLength(1);
+	});
+
+	test("ledger-matched findings are journaled, not investigated, not reported", async () => {
+		let investigated = false;
+		const d = deps({
+			investigate: async () => {
+				investigated = true;
+				return { diagnoses: null, failure: null };
+			},
+		});
+		d.state.addSuppression("alarm:cpu:%", "accepted dev rightsizing noise");
+		const out = await runCycle(d);
+		expect(investigated).toBe(false);
+		expect(out.findings).toHaveLength(0);
+		expect(out.suppressed).toBe(1);
+		expect(d.sent).toHaveLength(0);
+		expect(d.state.journalRows(60_000, "suppressed_finding")).toHaveLength(1);
+	});
+
+	test("suppressed count rides the report as a footnote when other findings ship", async () => {
+		const d = deps({
+			checks: [
+				{
+					name: "alarms",
+					run: async () => [F(), F({ dedup_key: "alarm:noisy:ALARM", resource: "noisy" })],
+				},
+			],
+		});
+		d.state.addSuppression("alarm:noisy:%", "known flap");
+		const out = await runCycle(d);
+		expect(out.findings).toHaveLength(1);
+		expect(out.suppressed).toBe(1);
+		expect(d.sent[0]).toContain("suppressed: 1 finding(s)");
+		expect(d.sent[0]).not.toContain("noisy:");
+	});
 });
 
 describe("makeGuard", () => {

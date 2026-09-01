@@ -33,7 +33,8 @@ operator role.
 - Each account also runs `monitor-<alias>`: a deterministic monitor,
   registered as an explicit peer, so it is hidden from the pool widget and
   from broadcasts. Address it by full name for commands: `run-checks`,
-  `status`, `digest`, `history`.
+  `status`, `digest`, `history`, `suppressions`,
+  `suppress <pattern> | <reason>`, `unsuppress <pattern>`.
 - Agents are read-only by design. Never instruct one to change
   infrastructure, and never ask one for secret values -- their access is
   metadata-only and the request itself is noise in the audit log.
@@ -74,7 +75,19 @@ operator role.
   an account-wide `INSUFFICIENT_DATA` sweep at `warn` can be the real event.
   Say what the evidence shows, whatever the label says.
 - The daily digest doubles as a dead-man signal: a missing digest is itself
-  a finding about the pipeline.
+  a finding about the pipeline. A digest whose header says DEGRADED means
+  some check families errored in the window: treat the quiet parts of that
+  digest as "not inspected", not "healthy".
+- The suppression ledger is the answer to accepted, recurring noise: when
+  the operator decides a finding family is known-and-accepted (for example
+  low-utilization alarm flaps in a dev account), suppress it on that
+  account's monitor with a dedup-key pattern and a reason instead of
+  re-triaging it every report. Suppressed findings stay in the journal and
+  show as a count; `suppressions` lists the ledger. Suppress only on the
+  operator's decision, never on your own.
+- The digest's `bundle:` line is the deploy canary. After a fleet deploy,
+  agents whose digests still show the old bundle version are running stale
+  code.
 
 ## Synthesis standards
 

@@ -5,16 +5,24 @@
 // coms-net; reports mail to the operator via the hub mailbox with a long TTL.
 // Run as pi-monitor.service; state in ~/.pi/monitor/state.db.
 
+import { ACMClient } from "@aws-sdk/client-acm";
+import { CloudTrailClient } from "@aws-sdk/client-cloudtrail";
 import { CloudWatchClient, DescribeAlarmsCommand } from "@aws-sdk/client-cloudwatch";
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { CostExplorerClient } from "@aws-sdk/client-cost-explorer";
 import { EC2Client } from "@aws-sdk/client-ec2";
+import { STSClient } from "@aws-sdk/client-sts";
 import * as os from "node:os";
 import * as path from "node:path";
 import { checkAlarms } from "./monitor/checks/alarms.ts";
+import { checkCerts } from "./monitor/checks/certs.ts";
 import { checkCost } from "./monitor/checks/cost.ts";
 import { checkDrift } from "./monitor/checks/drift.ts";
+import { checkIdentity, type GateResult } from "./monitor/checks/identity.ts";
+import { checkIngestion } from "./monitor/checks/ingestion.ts";
 import { checkLogs } from "./monitor/checks/logs.ts";
+import { checkTrail } from "./monitor/checks/trail.ts";
+import { checkWatchlist } from "./monitor/checks/watchlist.ts";
 import { MonitorComs } from "./monitor/coms.ts";
 import {
 	DIAGNOSIS_RESPONSE_SCHEMA,
@@ -32,6 +40,9 @@ const MONITOR_NAME = process.env.PI_MONITOR_NAME ?? `monitor-aws-${ACCOUNT_ID}`;
 const REPORT_TO = process.env.PI_MONITOR_REPORT_TO ?? "laptop";
 const REPORT_TTL_MS = Number(process.env.PI_MONITOR_REPORT_TTL_MS ?? 1_209_600_000);
 const CHECK_CRON = process.env.PI_MONITOR_CHECK_CRON ?? "*/15 * * * *";
+// Minute 7 deliberately: never a */15 boundary, so the hourly guard cannot
+// collide with the check guard (see the midnight-collision note below).
+const HOURLY_CRON = process.env.PI_MONITOR_HOURLY_CRON ?? "7 * * * *";
 const DAILY_CRON = process.env.PI_MONITOR_DAILY_CRON ?? "@daily";
 const INVESTIGATE_TARGET = process.env.PI_MONITOR_INVESTIGATE_TARGET ?? `aws-${ACCOUNT_ID}`;
 const INVESTIGATE_TIMEOUT_MS = Number(process.env.PI_MONITOR_INVESTIGATE_TIMEOUT_MS ?? 300_000);
@@ -63,6 +74,13 @@ const LOGS_EXCLUDE = (process.env.PI_MONITOR_LOGS_EXCLUDE ?? "")
 	.filter(Boolean);
 const JOURNAL_RETAIN_MS =
 	Number(process.env.PI_MONITOR_JOURNAL_RETAIN_DAYS ?? 90) * 86_400_000;
+const INGEST_MIN_EVENTS = Number(process.env.PI_MONITOR_INGEST_MIN_EVENTS ?? 10);
+const WATCHLIST = (process.env.PI_MONITOR_WATCHLIST ?? "")
+	.split(",")
+	.map((s) => s.trim())
+	.filter(Boolean);
+const CERT_WARN_DAYS = Number(process.env.PI_MONITOR_CERT_WARN_DAYS ?? 30);
+const CERT_CRIT_DAYS = Number(process.env.PI_MONITOR_CERT_CRIT_DAYS ?? 7);
 const STATE_DB =
 	process.env.PI_MONITOR_STATE_DB ?? path.join(os.homedir(), ".pi", "monitor", "state.db");
 
@@ -72,6 +90,9 @@ export type InvestigationOutcome = {
 };
 
 export type CycleDeps = {
+	// T0: runs before everything; unhealthy skips the checks for this cycle
+	// (a broken identity turns every check into correlated noise).
+	gate?: { name: string; run: () => Promise<{ findings: Finding[]; healthy: boolean }> };
 	checks: { name: string; run: () => Promise<Finding[]> }[];
 	state: MonitorState;
 	investigate:
@@ -81,14 +102,45 @@ export type CycleDeps = {
 	log: (line: string) => void;
 };
 
-export async function runCycle(deps: CycleDeps): Promise<{ findings: Finding[] }> {
-	const findings: Finding[] = [];
-	for (const c of deps.checks) {
+export async function runCycle(
+	deps: CycleDeps,
+): Promise<{ findings: Finding[]; suppressed: number }> {
+	const collected: Finding[] = [];
+	let gated = false;
+	if (deps.gate) {
 		try {
-			findings.push(...(await c.run()));
+			const g = await deps.gate.run();
+			collected.push(...g.findings);
+			gated = !g.healthy;
+			if (gated) deps.log(`gate ${deps.gate.name} unhealthy: skipping checks this cycle`);
 		} catch (e: any) {
-			deps.state.journal("check_error", { check: c.name, error: String(e?.message ?? e) });
-			deps.log(`check ${c.name} failed: ${e?.message ?? e}`);
+			// A throwing gate is an unknown, not a proven failure: journal it and
+			// let the checks report reality.
+			deps.state.journal("check_error", { check: deps.gate.name, error: String(e?.message ?? e) });
+			deps.log(`gate ${deps.gate.name} threw: ${e?.message ?? e}`);
+		}
+	}
+	if (!gated) {
+		for (const c of deps.checks) {
+			try {
+				collected.push(...(await c.run()));
+			} catch (e: any) {
+				deps.state.journal("check_error", { check: c.name, error: String(e?.message ?? e) });
+				deps.log(`check ${c.name} failed: ${e?.message ?? e}`);
+			}
+		}
+	}
+
+	// Ledger pass: operator-accepted findings are history, not alerts.
+	const findings: Finding[] = [];
+	let suppressed = 0;
+	for (const f of collected) {
+		const m = deps.state.matchSuppression(f.dedup_key);
+		if (m) {
+			suppressed++;
+			deps.state.journal("suppressed_finding", { ...f, suppressed_by: m.pattern, reason: m.reason });
+		} else {
+			findings.push(f);
 		}
 	}
 
@@ -118,6 +170,7 @@ export async function runCycle(deps: CycleDeps): Promise<{ findings: Finding[] }
 			ACCOUNT_ID,
 			findings.map((f) => ({ finding: f, diagnosis: diagnoses?.get(f.dedup_key) ?? null })),
 			investigationFailure,
+			suppressed,
 		);
 		try {
 			await deps.report(text);
@@ -137,8 +190,8 @@ export async function runCycle(deps: CycleDeps): Promise<{ findings: Finding[] }
 		}
 	}
 
-	deps.state.journal("run", { findings: findings.length });
-	return { findings };
+	deps.state.journal("run", { findings: findings.length, suppressed });
+	return { findings, suppressed };
 }
 
 // Serializes runs across trigger sources (cron tick, run-checks command).
@@ -164,7 +217,26 @@ function main(): void {
 	const logs = new CloudWatchLogsClient({ region });
 	const ec2 = new EC2Client({ region });
 	const ce = new CostExplorerClient({ region: "us-east-1" }); // Cost Explorer is us-east-1 only
+	const sts = new STSClient({ region });
+	const cloudtrail = new CloudTrailClient({ region });
+	const acm = new ACMClient({ region });
 	const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
+
+	const gate = {
+		name: "identity",
+		run: (): Promise<GateResult> => checkIdentity(sts, state, { expectedAccountId: ACCOUNT_ID }),
+	};
+
+	// Deploy canary for the digest: the bundle version this monitor is running.
+	const bundleFile = path.resolve(import.meta.dir, "..", ".bundle-version");
+	const bundleVersion = async (): Promise<string | null> => {
+		try {
+			const v = (await Bun.file(bundleFile).text()).trim();
+			return v || null;
+		} catch {
+			return null; // dev checkout: no bundle file
+		}
+	};
 
 	// Assigned after construction; the onPrompt closure runs only once the SSE
 	// stream is open, well after assignment.
@@ -211,6 +283,7 @@ function main(): void {
 	};
 
 	const fifteenDeps: CycleDeps = {
+		gate,
 		checks: [
 			{ name: "alarms", run: () => checkAlarms(cw, state) },
 			{
@@ -225,6 +298,24 @@ function main(): void {
 					}),
 			},
 			{ name: "drift", run: () => checkDrift(ec2, state) },
+		],
+		state,
+		investigate,
+		report,
+		log,
+	};
+
+	const hourlyDeps: CycleDeps = {
+		gate,
+		checks: [
+			{
+				name: "ingestion",
+				run: () =>
+					checkIngestion(cw, state, {
+						minEvents: INGEST_MIN_EVENTS,
+						excludePrefixes: LOGS_EXCLUDE.length > 0 ? LOGS_EXCLUDE : undefined,
+					}),
+			},
 		],
 		state,
 		investigate,
@@ -256,18 +347,29 @@ function main(): void {
 			activeAlarms,
 			yesterdayUsd: latest?.usd ?? null,
 			baselineUsd: latest ? state.costBaseline(latest.date, 14) : null,
+			bundleVersion: await bundleVersion(),
+			suppressedCount: state.journalRows(day, "suppressed_finding").length,
 		});
 	};
 
 	const dailyDigest = async (): Promise<void> => {
-		const costDeps: CycleDeps = {
-			checks: [{ name: "cost", run: () => checkCost(ce, state, { pct: COST_PCT, abs: COST_ABS }) }],
+		const dailyDeps: CycleDeps = {
+			gate,
+			checks: [
+				{ name: "cost", run: () => checkCost(ce, state, { pct: COST_PCT, abs: COST_ABS }) },
+				{ name: "trail", run: () => checkTrail(cloudtrail, state) },
+				{ name: "certs", run: () => checkCerts(acm, state, { warnDays: CERT_WARN_DAYS, critDays: CERT_CRIT_DAYS }) },
+				{
+					name: "watchlist",
+					run: () => checkWatchlist(cloudtrail, state, WATCHLIST.length > 0 ? { events: WATCHLIST } : {}),
+				},
+			],
 			state,
 			investigate,
 			report,
 			log,
 		};
-		await runCycle(costDeps);
+		await runCycle(dailyDeps);
 		const pruned = state.pruneJournal(JOURNAL_RETAIN_MS);
 		if (pruned > 0) log(`journal pruned: ${pruned} row(s) past retention`);
 		// The digest ships even when quiet; a missing digest is the dead-man signal.
@@ -286,11 +388,14 @@ function main(): void {
 	// digest never ships. Each guard still serializes its own job against the
 	// run-checks command.
 	const checkGuard = makeGuard();
+	const hourlyGuard = makeGuard();
 	const dailyGuard = makeGuard();
 	const runChecksNow = () => checkGuard(async () => void (await runCycle(fifteenDeps)));
+	const runHourlyNow = () => hourlyGuard(async () => void (await runCycle(hourlyDeps)));
 
 	handleCommand = async (prompt: string): Promise<string> => {
-		const cmd = prompt.trim().toLowerCase();
+		const raw = prompt.trim();
+		const cmd = raw.toLowerCase();
 		if (cmd === "run-checks") {
 			await runChecksNow();
 			const last = state.journalRows(60_000, "run").at(-1);
@@ -307,13 +412,41 @@ function main(): void {
 				? "no findings in the last 7 days"
 				: rows.map((r) => `${r.ts} ${r.payload}`).join("\n");
 		}
-		return "unknown command. available: run-checks, status, digest, history";
+		if (cmd === "suppressions") {
+			const rows = state.listSuppressions();
+			return rows.length === 0
+				? "suppression ledger is empty"
+				: rows.map((r) => `${r.created_at} ${r.pattern} -- ${r.reason}`).join("\n");
+		}
+		if (cmd.startsWith("unsuppress ")) {
+			const pattern = raw.slice("unsuppress ".length).trim();
+			return state.removeSuppression(pattern)
+				? `removed suppression: ${pattern}`
+				: `no suppression matches: ${pattern}`;
+		}
+		if (cmd.startsWith("suppress ")) {
+			// Pattern keeps its case (dedup keys carry alarm and group names);
+			// SQL LIKE with % wildcards, e.g.: suppress alarm:%-Utilization-Low-20% | accepted dev rightsizing noise
+			const rest = raw.slice("suppress ".length);
+			const sep = rest.indexOf("|");
+			const pattern = (sep >= 0 ? rest.slice(0, sep) : rest).trim();
+			const reason = sep >= 0 ? rest.slice(sep + 1).trim() : "";
+			if (!pattern || !reason) {
+				return "usage: suppress <dedup-key LIKE pattern> | <reason>";
+			}
+			state.addSuppression(pattern, reason);
+			return `suppressed: ${pattern} (${reason})`;
+		}
+		return "unknown command. available: run-checks, status, digest, history, suppressions, suppress <pattern> | <reason>, unsuppress <pattern>";
 	};
 
 	void (async () => {
 		await coms.start();
-		log(`registered as ${coms.name}; checks ${CHECK_CRON}; daily ${DAILY_CRON}; reporting to ${REPORT_TO}`);
+		log(
+			`registered as ${coms.name}; checks ${CHECK_CRON}; hourly ${HOURLY_CRON}; daily ${DAILY_CRON}; reporting to ${REPORT_TO}`,
+		);
 		Bun.cron(CHECK_CRON, () => runChecksNow());
+		Bun.cron(HOURLY_CRON, () => runHourlyNow());
 		Bun.cron(DAILY_CRON, () => dailyGuard(dailyDigest));
 	})();
 
