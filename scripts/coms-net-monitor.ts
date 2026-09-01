@@ -219,7 +219,9 @@ function main(): void {
 					checkLogs(logs, state, {
 						filterPattern: LOGS_FILTER,
 						maxGroups: LOGS_MAX_GROUPS,
-						excludePrefixes: LOGS_EXCLUDE,
+						// Empty env means "use the check's default excludes", not
+						// "exclude nothing".
+						excludePrefixes: LOGS_EXCLUDE.length > 0 ? LOGS_EXCLUDE : undefined,
 					}),
 			},
 			{ name: "drift", run: () => checkDrift(ec2, state) },

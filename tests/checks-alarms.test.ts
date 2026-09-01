@@ -19,10 +19,10 @@ describe("checkAlarms", () => {
 		expect(second).toHaveLength(0);
 	});
 
-	test("INSUFFICIENT_DATA is warn", async () => {
+	test("INSUFFICIENT_DATA is info (designed nightly metric gaps, never investigated)", async () => {
 		const state = new MonitorState(":memory:");
 		const out = await checkAlarms(fakeClient([{ AlarmName: "a", StateValue: "INSUFFICIENT_DATA" }]), state);
-		expect(out[0].severity).toBe("warn");
+		expect(out[0].severity).toBe("info");
 	});
 
 	test("recovery to OK ships info once, then quiet", async () => {

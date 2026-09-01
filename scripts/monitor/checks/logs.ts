@@ -9,6 +9,10 @@ import type { AwsClient } from "./alarms.ts";
 // become a warn finding, and warn findings trigger agent investigations.
 const FILTER_PATTERN = "?ERROR ?Exception";
 const MAX_GROUPS = 200;
+// /aws/events/ groups hold EventBridge delivery echo (e.g. CloudTrail API
+// records), not application logs; the monitor's own FilterLogEvents calls
+// land there and match the pattern -- a self-referential false positive.
+const EXCLUDE_PREFIXES = ["/aws/events/"];
 const MAX_SIGS_PER_GROUP = 3;
 const MAX_FINDINGS_PER_CYCLE = 10;
 
@@ -17,6 +21,10 @@ const MAX_FINDINGS_PER_CYCLE = 10;
 export function logSignature(message: string): string {
 	const normalized = message
 		.replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z?/g, "<ts>")
+		// UUIDs before the hex pass: their 4-char middle segments would
+		// otherwise survive normalization and give every event a fresh
+		// signature, defeating dedup.
+		.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>")
 		.replace(/\b[0-9a-f]{8,}\b/gi, "<hex>")
 		.replace(/\d+/g, "<n>")
 		.slice(0, 120);
@@ -44,7 +52,7 @@ export async function checkLogs(
 	const lookbackMs = opts.lookbackMs ?? 900_000;
 	const filterPattern = opts.filterPattern ?? FILTER_PATTERN;
 	const maxGroups = opts.maxGroups ?? MAX_GROUPS;
-	const excludePrefixes = opts.excludePrefixes ?? [];
+	const excludePrefixes = opts.excludePrefixes ?? EXCLUDE_PREFIXES;
 	const maxSigsPerGroup = opts.maxSigsPerGroup ?? MAX_SIGS_PER_GROUP;
 	const maxFindingsPerCycle = opts.maxFindingsPerCycle ?? MAX_FINDINGS_PER_CYCLE;
 	const findings: Finding[] = [];
