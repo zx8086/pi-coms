@@ -277,6 +277,7 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
           "wafv2:GetWebACL",
           "wafv2:ListWebACLs",
           "wafv2:GetWebACLForResource",
+          "wafv2:ListResourcesForWebACL",
           "wafv2:GetLoggingConfiguration",
           "wafv2:ListLoggingConfigurations",
           "wafv2:GetSampledRequests",
