@@ -331,6 +331,11 @@ function main(): void {
 			const fam = (JSON.parse(r.payload) as Finding).family;
 			counts[fam] = (counts[fam] ?? 0) + 1;
 		}
+		const errsByCheck: Record<string, number> = {};
+		for (const r of state.journalRows(day, "check_error")) {
+			const check = String((JSON.parse(r.payload) as any).check ?? "unknown");
+			errsByCheck[check] = (errsByCheck[check] ?? 0) + 1;
+		}
 		let activeAlarms: string[] = [];
 		try {
 			const resp = await cw.send(new DescribeAlarmsCommand({ StateValue: "ALARM" }));
@@ -344,6 +349,7 @@ function main(): void {
 			since: new Date(Date.now() - day).toISOString(),
 			findingCounts: counts,
 			checkErrors: state.journalRows(day, "check_error").length,
+			checkErrorsByCheck: errsByCheck,
 			activeAlarms,
 			yesterdayUsd: latest?.usd ?? null,
 			baselineUsd: latest ? state.costBaseline(latest.date, 14) : null,
@@ -403,7 +409,13 @@ function main(): void {
 		}
 		if (cmd === "status") {
 			const lastRun = state.journalRows(7 * 86_400_000, "run").at(-1);
-			return `monitor ${MONITOR_NAME} online. last run: ${lastRun ? `${lastRun.ts} ${lastRun.payload}` : "never"}. unsent reports: ${state.unsent().length}`;
+			// 24h totals ride along: the last run alone reads as "all quiet"
+			// while findings from earlier cycles sit in the inbox.
+			const day = 86_400_000;
+			const day24 = state.journalRows(day, "finding").length;
+			const sup24 = state.journalRows(day, "suppressed_finding").length;
+			const err24 = state.journalRows(day, "check_error").length;
+			return `monitor ${MONITOR_NAME} online. last run: ${lastRun ? `${lastRun.ts} ${lastRun.payload}` : "never"}. last 24h: ${day24} finding(s), ${sup24} suppressed, ${err24} check error(s). unsent reports: ${state.unsent().length}`;
 		}
 		if (cmd === "digest") return buildDigest();
 		if (cmd.startsWith("history")) {

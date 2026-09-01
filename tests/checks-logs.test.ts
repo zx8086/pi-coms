@@ -149,3 +149,82 @@ describe("checkLogs noise controls (SIO-1590)", () => {
 		expect(optIn).toHaveLength(1);
 	});
 });
+
+describe("checkLogs id normalization (SIO-1592)", () => {
+	test("mixed alphanumeric ids (option codes) share one signature", () => {
+		const a = logSignature(
+			"NotFoundException: No order items with option code UW0UW061470LZ in order 1002029318 could be found",
+		);
+		const b = logSignature(
+			"NotFoundException: No order items with option code MW0MW25037YBR in order 1002027574 could be found",
+		);
+		expect(a).toBe(b);
+	});
+
+	test("a single version digit does not turn a class name into an id", () => {
+		// V2 vs V3 collapse via plain digit normalization (by design), but the
+		// class name's letters survive -- unlike an <id>, which erases them.
+		const a = logSignature("ERROR ImagesClientV2 request failed");
+		const b = logSignature("ERROR StockClientV2 request failed");
+		expect(a).not.toBe(b);
+	});
+});
+
+function failingClient(
+	groups: string[],
+	failures: Record<string, string>,
+	eventsByGroup: Record<string, { timestamp: number; message: string }[]> = {},
+) {
+	return {
+		async send(cmd: any) {
+			if (cmd.constructor.name === "DescribeLogGroupsCommand") {
+				return { logGroups: groups.map((g) => ({ logGroupName: g })) };
+			}
+			const g = cmd.input.logGroupName as string;
+			if (failures[g]) throw new Error(failures[g]);
+			const since = cmd.input.startTime as number;
+			return { events: (eventsByGroup[g] ?? []).filter((e) => e.timestamp >= since) };
+		},
+	};
+}
+
+describe("checkLogs scope tolerance (SIO-1592)", () => {
+	const now = 1_000_000_000_000;
+	const denied =
+		"User: arn:aws:sts::1:assumed-role/x is not authorized to perform: logs:FilterLogEvents on resource: y because no identity-based policy allows the logs:FilterLogEvents action";
+
+	test("a denied group is one info scoping finding; the scan continues", async () => {
+		const state = new MonitorState(":memory:");
+		const client = failingClient(["/aws-dynamodb/x", "/aws/app"], { "/aws-dynamodb/x": denied }, {
+			"/aws/app": [{ timestamp: now - 60_000, message: "ERROR real problem" }],
+		});
+		const out = await checkLogs(client, state, { now });
+		const scope = out.filter((f) => f.severity === "info");
+		const warns = out.filter((f) => f.severity === "warn");
+		expect(scope).toHaveLength(1);
+		expect(scope[0].summary).toContain("outside the readable name scope");
+		expect(warns).toHaveLength(1);
+		expect(warns[0].resource).toBe("/aws/app");
+		// second cycle: scope finding is deduped, real scanning still works
+		const again = await checkLogs(client, state, { now: now + 60_000 });
+		expect(again.filter((f) => f.severity === "info")).toHaveLength(0);
+	});
+
+	test("a non-auth failure on one group skips it without killing the check", async () => {
+		const state = new MonitorState(":memory:");
+		const client = failingClient(["/g1", "/g2"], { "/g1": "ThrottlingException: slow down" }, {
+			"/g2": [{ timestamp: now - 60_000, message: "ERROR still seen" }],
+		});
+		const out = await checkLogs(client, state, { now });
+		expect(out.filter((f) => f.severity === "warn")).toHaveLength(1);
+	});
+
+	test("non-auth failure on every group throws (real check failure)", async () => {
+		const state = new MonitorState(":memory:");
+		const client = failingClient(["/g1", "/g2"], {
+			"/g1": "ThrottlingException",
+			"/g2": "ThrottlingException",
+		});
+		await expect(checkLogs(client, state, { now })).rejects.toThrow("all 2 log group scan(s) failed");
+	});
+});

@@ -265,6 +265,26 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
         ]
         Resource = "*"
       }],
+      // WAF and delivery-pipeline reads (SIO-1592): an ingestion finding on a
+      // WAF log group cannot be concluded without them -- "traffic dropped to
+      // zero" and "log delivery broke" are indistinguishable. GetSampledRequests
+      // shows whether real traffic exists; Firehose describe shows whether the
+      // delivery stream is healthy. All read-only.
+      [{
+        Sid    = "WafAndDeliveryReads"
+        Effect = "Allow"
+        Action = [
+          "wafv2:GetWebACL",
+          "wafv2:ListWebACLs",
+          "wafv2:GetWebACLForResource",
+          "wafv2:GetLoggingConfiguration",
+          "wafv2:ListLoggingConfigurations",
+          "wafv2:GetSampledRequests",
+          "firehose:DescribeDeliveryStream",
+          "firehose:ListDeliveryStreams",
+        ]
+        Resource = "*"
+      }],
       // Certificate expiry is a fully predictable outage; the monitor's daily
       // cert check (SIO-1591) makes it a non-event. Read-only metadata.
       [{

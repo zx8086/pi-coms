@@ -26,6 +26,13 @@ export function logSignature(message: string): string {
 		// signature, defeating dedup.
 		.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>")
 		.replace(/\b[0-9a-f]{8,}\b/gi, "<hex>")
+		// Mixed alphanumeric ids (option codes like UW0UW061470LZ, article
+		// keys): a fresh signature per SKU defeats dedup exactly the way raw
+		// UUIDs did. A token of 8+ word chars with 2+ digits is an id, not a
+		// word; class names with a single version digit (ImagesClientV2) stay.
+		.replace(/\b[A-Za-z0-9_]{8,}\b/g, (t) =>
+			(t.match(/\d/g)?.length ?? 0) >= 2 ? "<id>" : t,
+		)
 		.replace(/\d+/g, "<n>")
 		.slice(0, 120);
 	return crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 12);
@@ -78,17 +85,44 @@ export async function checkLogs(
 	} while (nextToken && groups.length < maxGroups);
 	groups.splice(maxGroups);
 
+	// One unreadable group must not kill the scan: a denied group is a scoping
+	// fact (name-scoped log IAM), reported once as info, and the rest of the
+	// estate still gets scanned this cycle.
+	const groupErrors: string[] = [];
 	for (const group of groups) {
 		const wmKey = `logs:${group}`;
 		const since = state.getWatermark(wmKey) ?? now - lookbackMs;
-		const resp = await client.send(
-			new FilterLogEventsCommand({
-				logGroupName: group,
-				startTime: since,
-				endTime: now,
-				filterPattern,
-			}),
-		);
+		let resp: any;
+		try {
+			resp = await client.send(
+				new FilterLogEventsCommand({
+					logGroupName: group,
+					startTime: since,
+					endTime: now,
+					filterPattern,
+				}),
+			);
+		} catch (e: any) {
+			const msg = String(e?.message ?? e);
+			if (/not authorized|AccessDenied|UnauthorizedOperation/i.test(msg)) {
+				const scopeKey = `logs:scope:${group}:`;
+				if (state.shouldAlert(scopeKey)) {
+					state.markAlerted(scopeKey, "logs");
+					findings.push({
+						family: "logs",
+						severity: "info",
+						resource: group,
+						summary: `Log group ${group} is outside the readable name scope (not inspected)`,
+						dedup_key: scopeKey,
+						evidence: { error: msg.slice(0, 300) },
+						at: new Date(now).toISOString(),
+					});
+				}
+			} else {
+				groupErrors.push(`${group}: ${msg}`);
+			}
+			continue;
+		}
 		const events: { timestamp: number; message: string }[] = resp.events ?? [];
 		if (events.length === 0) continue;
 
@@ -143,6 +177,10 @@ export async function checkLogs(
 			evidence: { overflow },
 			at: new Date(now).toISOString(),
 		});
+	}
+	// Non-auth failures on every group is a real check failure, not scoping.
+	if (groups.length > 0 && groupErrors.length === groups.length) {
+		throw new Error(`all ${groups.length} log group scan(s) failed: ${groupErrors[0]}`);
 	}
 	return findings;
 }

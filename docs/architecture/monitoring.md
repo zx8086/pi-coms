@@ -80,7 +80,7 @@ Every cycle starts with a T0 gate: `sts:GetCallerIdentity` compared against `AWS
 |-------|---------|-------|-------|
 | Identity (gate) | every cycle, first | `GetCallerIdentity`; mismatch or denial critical, recovery info | 24 h re-alert while broken; the gate skip continues even while deduped |
 | Alarms | 15 min | `DescribeAlarms`; transitions into ALARM (critical) / INSUFFICIENT_DATA (info -- nightly scale-to-zero flaps these by design), recovery to OK (info) | Alarm name + state: a still-firing alarm alerts once, and only a state change re-arms it |
-| Log errors | 15 min | `FilterLogEvents` since a per-group watermark, pattern `?ERROR ?Exception`, grouped by a normalized message signature; capped at 3 signatures/group and 10 warn findings/cycle, overflow journaled as one info finding | Group + signature hash; re-alerts after 24 h |
+| Log errors | 15 min | `FilterLogEvents` since a per-group watermark, pattern `?ERROR ?Exception`, grouped by a normalized message signature (timestamps, UUIDs, hex, digits, and mixed-alphanumeric ids all collapse); capped at 3 signatures/group and 10 warn findings/cycle, overflow journaled as one info finding. A group denied by the name-scoped log IAM is one info scoping finding, and the scan continues | Group + signature hash; re-alerts after 24 h |
 | Drift/health | 15 min | Instance state changes vs the stored snapshot (stop/terminate = warn), failed status checks | Edge-triggered by the snapshot diff; status-check fingerprints clear on recovery |
 | Cost | daily | Yesterday vs the trailing 14-day baseline; alerts only when over by **both** +20% and +$1 | Once per date |
 | Ingestion | hourly | Metrics Insights `IncomingLogEvents` per log group; warn when the last full hour is 0 against a same-hour-of-day 7-day median >= 10 (so the nightly scale-to-zero is silent by construction); recovery info. The inverse of the log-errors check: it finds logging that **stopped** | Per group, alert once until recovery |
@@ -105,7 +105,7 @@ Findings of severity warn or critical go to the account's Pi agent (`aws-<accoun
 Both report kinds go to `PI_MONITOR_REPORT_TO` (code default `laptop`; the bootstrap sets `ops` on deployed hosts) with a long TTL, so they wait in the hub mailbox when the operator is offline:
 
 1. **Incident report** whenever a run has findings: severity-first summary, per-finding diagnosis and evidence. Recoveries ship as info.
-2. **Daily digest** even when quiet: 24 h finding counts, check errors, current ALARM states, spend vs baseline, suppressed-finding count, and the deployed bundle version (the deploy canary: a stale bundle is visible without an SSM round-trip). When any check family errored in the window the header flags `DEGRADED` at `[warn]` -- a green digest produced over broken checks would be a lie. A missing digest is itself the monitor's dead-man signal.
+2. **Daily digest** even when quiet: 24 h finding counts, check errors broken down by check family, current ALARM states, spend vs baseline, suppressed-finding count, and the deployed bundle version (the deploy canary: a stale bundle is visible without an SSM round-trip). When any check family errored in the window the header flags `DEGRADED` at `[warn]` -- a green digest produced over broken checks would be a lie. A missing digest is itself the monitor's dead-man signal.
 
 If the hub is unreachable at report time, the report is queued in `state.db` and retried on the next tick -- the mailbox covers the offline-recipient half, this covers the offline-hub half.
 
@@ -116,7 +116,7 @@ Any peer can prompt the monitor by name; it answers without a model:
 | Command | Reply |
 |---------|-------|
 | `run-checks` | Runs the 15-minute check families now (guarded against overlapping with the cron run) |
-| `status` | Liveness, last run, unsent report count |
+| `status` | Liveness, last run, 24 h finding/suppressed/check-error counts, unsent report count |
 | `digest` | The current digest, on demand |
 | `history` | Last 20 journaled findings (7 days) |
 | `suppressions` | The suppression ledger |
