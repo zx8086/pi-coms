@@ -99,6 +99,23 @@ CloudWatch Logs Insights grammar:
   queries -- a guessed field returns zero rows, which falsely reads as
   "no logs".
 
+## Telemetry topology
+
+Know where this account's telemetry actually lives before declaring loss,
+and encode what you learn in findings rather than re-deriving it:
+
+- The monitor observing the account CHANGES the account: its API calls land
+  in CloudTrail and EventBridge-fed log groups (`/aws/events/` prefixes).
+  Anything scanning those groups sees the monitor itself; activity there is
+  echo, not workload.
+- A log group outside the readable name scope is a scoping fact, report it
+  as such; a group with zero recent ingestion may belong to a workload that
+  ships its telemetry elsewhere (or is scheduled to zero overnight). Check
+  the schedule before reporting an outage.
+- "No data in system X" is only an outage if this account is known to ship
+  to system X. Absent that knowledge it is topology to characterize, not
+  loss to report.
+
 ## Error handling and retries
 
 Re-issuing an IDENTICAL failed call is always wrong; change the window, the

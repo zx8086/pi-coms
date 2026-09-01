@@ -5,7 +5,7 @@ Proactive monitoring of each AWS account by its own agent host, with durable del
 Design record: [`docs/superpowers/specs/2026-08-30-aws-monitor-design.md`](../superpowers/specs/2026-08-30-aws-monitor-design.md) (SIO-1575).
 
 ```
-+------------------+     15min/daily      +------------------+
++------------------+   15min/hourly/daily +------------------+
 |  pi-monitor      | -- Bun.cron ticks -->|  checks (AWS SDK)|
 |  (Bun process,   |                      +---------+--------+
 |  coms-net peer)  |                                | Finding[]
@@ -65,7 +65,7 @@ The hub used to store nothing durable. It now persists **prompt and response bod
 | Property | Value |
 |----------|-------|
 | Peer name | `monitor-aws-<account_id>`, registered `--explicit` (hidden from lists and broadcasts unless named) |
-| Scheduling | In-process `Bun.cron()` (requires Bun >= 1.4): `*/15 * * * *` for alarms/logs/drift, `@daily` for cost + digest |
+| Scheduling | In-process `Bun.cron()` (requires Bun >= 1.4): `*/15 * * * *` for alarms/logs/drift, `7 * * * *` for the ingestion heartbeat (minute 7 keeps its guard off the */15 boundary), `@daily` for cost/trail/certs/watchlist + digest |
 | State | `bun:sqlite` at `~/.pi/monitor/state.db`: watermarks, alert fingerprints, instance snapshots, cost history, journal, unsent-report queue |
 | Model usage | None inside the monitor. Zero token spend when no findings |
 | Modules | `scripts/monitor/checks/{alarms,logs,drift,cost}.ts`, `state.ts`, `report.ts`, `coms.ts` (headless coms-net client) |
@@ -74,14 +74,25 @@ The hub used to store nothing durable. It now persists **prompt and response bod
 
 All checks are deterministic AWS SDK calls under the instance role, with clients injected for testability.
 
+Every cycle starts with a T0 gate: `sts:GetCallerIdentity` compared against `AWS_ACCOUNT_ID`. A denial or account mismatch is a critical finding and skips the rest of that cycle's checks -- a monitor that silently loses access would otherwise report "all quiet" forever, and broken credentials would turn every check into correlated noise.
+
 | Check | Cadence | Logic | Dedup |
 |-------|---------|-------|-------|
+| Identity (gate) | every cycle, first | `GetCallerIdentity`; mismatch or denial critical, recovery info | 24 h re-alert while broken; the gate skip continues even while deduped |
 | Alarms | 15 min | `DescribeAlarms`; transitions into ALARM (critical) / INSUFFICIENT_DATA (info -- nightly scale-to-zero flaps these by design), recovery to OK (info) | Alarm name + state: a still-firing alarm alerts once, and only a state change re-arms it |
 | Log errors | 15 min | `FilterLogEvents` since a per-group watermark, pattern `?ERROR ?Exception`, grouped by a normalized message signature; capped at 3 signatures/group and 10 warn findings/cycle, overflow journaled as one info finding | Group + signature hash; re-alerts after 24 h |
 | Drift/health | 15 min | Instance state changes vs the stored snapshot (stop/terminate = warn), failed status checks | Edge-triggered by the snapshot diff; status-check fingerprints clear on recovery |
 | Cost | daily | Yesterday vs the trailing 14-day baseline; alerts only when over by **both** +20% and +$1 | Once per date |
+| Ingestion | hourly | Metrics Insights `IncomingLogEvents` per log group; warn when the last full hour is 0 against a same-hour-of-day 7-day median >= 10 (so the nightly scale-to-zero is silent by construction); recovery info. The inverse of the log-errors check: it finds logging that **stopped** | Per group, alert once until recovery |
+| Trail | daily | `GetTrailStatus` per trail: `IsLogging=false` critical, delivery error warn, zero trails info; recovery info. Shadow org trails that deny status reads are tolerated | Per trail + condition, 24 h re-alert |
+| Certs | daily | ACM `NotAfter`: < 30 d warn, < 7 d critical (managed renewal happens ~60 d out, so < 30 d means renewal is failing) | Per cert + severity, 7 d re-alert |
+| Watchlist | daily | `cloudtrail:LookupEvents` for scary write events (StopLogging, SG ingress, IAM edits, ...); one call per event name, watermarked. The monitor is read-only, so its own CloudTrail echo can never match | Per event id |
 
 Watermarks, fingerprints, and snapshots all persist in `state.db`, so a monitor restart produces neither duplicate nor missed alerts.
+
+### The suppression ledger
+
+Operator-accepted imperfections (`suppress <pattern> | <reason>`) live in a `suppressions` table; patterns are SQL `LIKE` against `dedup_key`, so `alarm:%-Utilization-Low-20%` covers a whole alarm family. A matching finding is journaled (`suppressed_finding`), never investigated, and never in the report body -- the incident report carries a one-line footnote count and the digest a daily total. This is the anti-fatigue device: a periodic report is read hundreds of times, and known, accepted imperfections must not re-raise as fresh findings.
 
 The agent module provisions one alarm itself -- `<name_prefix>-agent-status-check` (`StatusCheckFailed` on the agent host, no actions) -- so the alarm family always has a real signal even in an account with no other alarms: a degraded agent host becomes a critical incident report instead of silence.
 
@@ -94,7 +105,7 @@ Findings of severity warn or critical go to the account's Pi agent (`aws-<accoun
 Both report kinds go to `PI_MONITOR_REPORT_TO` (code default `laptop`; the bootstrap sets `ops` on deployed hosts) with a long TTL, so they wait in the hub mailbox when the operator is offline:
 
 1. **Incident report** whenever a run has findings: severity-first summary, per-finding diagnosis and evidence. Recoveries ship as info.
-2. **Daily digest** even when quiet: 24 h finding counts, check errors, current ALARM states, spend vs baseline. A missing digest is itself the monitor's dead-man signal.
+2. **Daily digest** even when quiet: 24 h finding counts, check errors, current ALARM states, spend vs baseline, suppressed-finding count, and the deployed bundle version (the deploy canary: a stale bundle is visible without an SSM round-trip). When any check family errored in the window the header flags `DEGRADED` at `[warn]` -- a green digest produced over broken checks would be a lie. A missing digest is itself the monitor's dead-man signal.
 
 If the hub is unreachable at report time, the report is queued in `state.db` and retried on the next tick -- the mailbox covers the offline-recipient half, this covers the offline-hub half.
 
@@ -108,6 +119,9 @@ Any peer can prompt the monitor by name; it answers without a model:
 | `status` | Liveness, last run, unsent report count |
 | `digest` | The current digest, on demand |
 | `history` | Last 20 journaled findings (7 days) |
+| `suppressions` | The suppression ledger |
+| `suppress <pattern> \| <reason>` | Add a ledger entry (`LIKE` pattern against dedup keys, reason required) |
+| `unsuppress <pattern>` | Remove a ledger entry |
 
 ```
 ask monitor-aws-356994971776 to run-checks
@@ -123,7 +137,8 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | `PI_MONITOR_REPORT_TO` | `laptop` (bootstrap sets `ops`) | Report recipient (a peer name) |
 | `PI_MONITOR_REPORT_TTL_MS` | `1209600000` (14 d) | Mailbox TTL on reports |
 | `PI_MONITOR_CHECK_CRON` | `*/15 * * * *` | Alarm/log/drift cadence |
-| `PI_MONITOR_DAILY_CRON` | `@daily` | Cost check + digest (midnight UTC) |
+| `PI_MONITOR_HOURLY_CRON` | `7 * * * *` | Ingestion heartbeat (minute 7: never a */15 boundary) |
+| `PI_MONITOR_DAILY_CRON` | `@daily` | Cost/trail/certs/watchlist + digest (midnight UTC) |
 | `PI_MONITOR_INVESTIGATE_TARGET` | `aws-<account_id>` | Peer that investigates findings |
 | `PI_MONITOR_INVESTIGATE_TIMEOUT_MS` | `300000` (5 min) | Investigation deadline base |
 | `PI_MONITOR_INVESTIGATE_PER_FINDING_MS` | `60000` (1 min) | Added to the deadline per finding in the batch |
@@ -132,6 +147,9 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | `PI_MONITOR_LOGS_MAX_GROUPS` | `200` | Log-group scan cap (paginated, alphabetical) |
 | `PI_MONITOR_LOGS_EXCLUDE` | `/aws/events/` (check default) | Comma-separated log-group name prefixes to skip; setting it replaces the default |
 | `PI_MONITOR_JOURNAL_RETAIN_DAYS` | `90` | Journal history retention, pruned at the daily tick |
+| `PI_MONITOR_INGEST_MIN_EVENTS` | `10` | Same-hour median floor below which a group never alerts on silence |
+| `PI_MONITOR_WATCHLIST` | see `checks/watchlist.ts` | Comma-separated CloudTrail event names; setting it replaces the default |
+| `PI_MONITOR_CERT_WARN_DAYS` / `PI_MONITOR_CERT_CRIT_DAYS` | `30` / `7` | Certificate expiry thresholds |
 | `PI_MONITOR_COST_PCT` / `PI_MONITOR_COST_ABS` | `20` / `1` | Cost anomaly double threshold |
 | `PI_MONITOR_STATE_DB` | `~/.pi/monitor/state.db` | State location |
 
@@ -139,7 +157,7 @@ Hub-side: `PI_COMS_NET_MAX_TTL_MS` (default `1209600000`, 14 days) caps any requ
 
 ### IAM
 
-Everything fits the existing role except the cost check: the module adds `ce:GetCostAndUsage` as the inline policy `cost-explorer-read` (`deploy/modules/agent/main.tf`). Cost Explorer is always called against `us-east-1`.
+Everything fits the existing role except two named additions in `deploy/modules/agent/main.tf`: `ce:GetCostAndUsage` (inline `cost-explorer-read`; Cost Explorer is always called against `us-east-1`) and `acm:ListCertificates`/`acm:DescribeCertificate` (`CertificateReads` in the dev-extensions policy) for the cert check. `sts:GetCallerIdentity` needs no grant; `cloudwatch:GetMetricData`, `cloudtrail:GetTrailStatus`, and `cloudtrail:LookupEvents` are already on the DevOpsAgentReadOnly policies.
 
 ---
 
