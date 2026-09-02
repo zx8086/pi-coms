@@ -32,6 +32,7 @@ import { truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { applyExtensionDefaults } from "./themeMap.ts";
 import { buildTurnReplies } from "./turnReply.ts";
+import { buildIdentityNote } from "./identityNote.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -1010,6 +1011,21 @@ export default function (pi: ExtensionAPI) {
 				server_url: serverUrl,
 			});
 		} catch { /* best-effort */ }
+
+		// 6b. Seed the agent's own coms name into context (SIO-1600). Uses the
+		// post-registration identity.name so a hub-renamed session (name2)
+		// reports its real name. Context-only: no turn, not shown to the operator.
+		try {
+			pi.sendMessage(
+				{
+					customType: "coms-net-identity",
+					content: buildIdentityNote(identity.name),
+					display: false,
+					details: { name: identity.name, project: identity.project },
+				},
+				{ deliverAs: "followUp", triggerTurn: false },
+			);
+		} catch { /* best-effort; identity note is not load-critical */ }
 
 		// 7. Install widget + status. Success is the default — only failures notify
 		// (status line + widget already convey the connected state).
