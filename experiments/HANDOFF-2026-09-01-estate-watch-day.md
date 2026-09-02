@@ -31,7 +31,7 @@ artifact has standing style rules now (no SIO-* ids, no storytelling).
 
 | Thing | Value |
 |---|---|
-| Repo | `main` @ `e5229a7`; fleet bundle `8da8814` verified on both agent hosts, monitors re-registered 09:34Z |
+| Repo | `main` @ `e5c621a` (SIO-1597 merged 2026-09-02); last host-verified fleet bundle `8da8814`, monitors re-registered 09:34Z on 2026-09-01; `84c542e`-era bundle converging via State Manager |
 | Hub | `i-042d0fed0cb5d8702`, `http://10.34.89.51:8787`, systemd `coms-hub`, account 352896877281. Tunnel: explicit `aws ssm start-session --target <id>` (documented) or `just hub-tunnel` (resolves by `tag:Name=pi-coms-hub-hub`) |
 | Agent hosts | shared `i-0c3605a259454e861` (profile `eu-shared-services-dev`), oit `i-02918165c40f57815` (profile `eu-oit-dev`), eu-central-1 |
 | Monitor schedule | `*/15` identity gate + alarms/logs/drift; `7 * * * *` ingestion heartbeat; `@daily` cost/trail/certs/watchlist + digest |
@@ -39,7 +39,7 @@ artifact has standing style rules now (no SIO-* ids, no storytelling).
 | IAM (dev-extensions, applied both accounts, in place) | + `CertificateReads` (acm), + `WafAndDeliveryReads` (wafv2 Get/List incl. GetSampledRequests + ListResourcesForWebACL, firehose Describe/List) |
 | Review state | O4 sign-off recorded; R1 (Bedrock policy) and R3 (plain HTTP private wire) closed as design-accepted facts; O8 (VPN CIDR) is the ONE open estate item; O9 principals as needed |
 | Journal retention | 90 d confirmed correct by operator -- do not propose changing it |
-| Tests | `bun test`: 134 pass |
+| Tests | `bun test`: 142 pass (2026-09-02, after SIO-1597) |
 
 ## What shipped (all merged, deployed where host-relevant, live-verified)
 
@@ -91,6 +91,47 @@ artifact has standing style rules now (no SIO-* ids, no storytelling).
      badges now read "default" (A) and "pending O8" (B).
    - Layout: `p { max-width: 70ch }` removed so paragraphs span the same
      880px column as the tables.
+7. Artifact readability pass (2026-09-02, same url, label
+   `plain-summary-o8-only`):
+   - Header summary rewritten in plain language: what the system is (private
+     fleet of AI agents inside the company network), what the hub does
+     (relays messages, queues reports until the operator connects), and the
+     access facts in everyday terms (read-only role, Bedrock under the same
+     role, no API keys, updates from a shared S3 bundle). Only remaining
+     technical token is the hub address.
+   - Open items table trimmed to O8 only. O9 (principals as-needed) and the
+     security-review sign-off row removed -- the sign-off is no longer
+     recorded on the page; this handover and Linear remain the record.
+8. SIO-1597 (PR #51, merged 2026-09-02, main @ `e5c621a`): drift detection
+   extended beyond EC2 and the CloudTrail watchlist widened.
+   - New `scripts/monitor/checks/resource-drift.ts` on the 15-min cycle,
+     snapshot-diffing security-group rules (change = warn), route-table
+     routes (change = warn), RDS settings (public flip = critical, status =
+     warn, class/version = info), Lambda config via one paginated
+     ListFunctions (role = warn, rest info). First run baselines silently;
+     a failing sub-scan is one fingerprinted info finding and the other
+     scans continue.
+   - `DEFAULT_WATCHLIST` + 9 events (SG egress/revocations, route
+     create/replace/delete, DeleteRouteTable, DeleteBucketPolicy,
+     PutPublicAccessBlock); ModifyDBInstance deliberately excluded
+     (resource drift catches RDS within 15 min, watchlist is daily).
+   - New deps `@aws-sdk/client-rds` + `@aws-sdk/client-lambda`. No IAM
+     change (base policy already grants the describes). `bun test`: 142
+     pass. `docs/architecture/monitoring.md` updated; artifact 15-min
+     cadence, snapshots, and watchlist rows updated same day.
+   - Post-deploy check: after both hosts converge on the `84c542e`-era
+     bundle, the first cycle establishes SG/RTB/RDS/Lambda baselines
+     silently -- expect no drift findings unless something actually changed.
+9. Artifact readability sweep (2026-09-02, ~15 republishes, same url):
+   em dashes removed page-wide with sentences restructured; monitor
+   pipeline split into cadence + step tables with explanatory intros;
+   multi-operator, token-admin, storage (memory vs disk, restart
+   semantics), monitor-state, and herdr-remote sections expanded to
+   explain rather than compress; instruction-files block moved to an
+   appendix; Estate Watch tier ladder added as an appendix (replaces the
+   repo-path reference); two factual fixes (reports are read on demand,
+   not pushed to `laptop`; three EC2 instances, not two); method A/B
+   snippets show the raw `pi -e extensions/coms-net.ts` command.
 
 ## Next steps
 
@@ -118,7 +159,9 @@ artifact has standing style rules now (no SIO-* ids, no storytelling).
   Dates only as status/disposition records. Extended 2026-09-01 evening: no
   aside/commentary paragraphs at all -- facts live in the tables or section
   intros; no rationale clauses, metaphors, temporal phrases, or emphasis
-  words; body text same width as tables.
+  words; body text same width as tables. Extended 2026-09-02: header summary
+  in plain language (technical identifiers stay in the section tables); open
+  items lists only what actually needs action (currently O8).
 - The operator prefers the explicit `--target <hub-instance-id>` tunnel
   command in docs; `just hub-tunnel` exists but is deliberately not the
   documented path. Hub instance id is found via `tag:Name=pi-coms-hub-hub`.
