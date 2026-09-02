@@ -19,6 +19,7 @@ import { Text, Container, truncateToWidth, visibleWidth, wrapTextWithAnsi } from
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { applyExtensionDefaults } from "./themeMap.ts";
+import { buildTurnReplies } from "./turnReply.ts";
 import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -1426,10 +1427,12 @@ export default function (pi: ExtensionAPI) {
 		name: "coms_await",
 		label: "Coms Await",
 		description:
-			"Block until a pending coms_send reply lands or the timeout fires. Default timeout 30 minutes (PI_COMS_TIMEOUT_MS).",
+			"Block until a pending coms_send reply lands or the timeout fires. Default timeout 30 minutes (PI_COMS_TIMEOUT_MS). " +
+			"The reply only arrives when the target's whole turn ends, so a prompt that makes it investigate " +
+			"routinely takes several minutes — keep the default or override with minutes, not seconds.",
 		parameters: Type.Object({
 			msg_id: Type.String({ description: "msg_id returned by coms_send." }),
-			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms)." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends." })),
 		}),
 		async execute(_callId, params) {
 			const entry = pendingReplies.get(params.msg_id);
@@ -1478,8 +1481,7 @@ export default function (pi: ExtensionAPI) {
 	// ━━ agent_end: capture turn output and dispatch response back ━━━━━━━━
 
 	pi.on("agent_end", async (_event, ctx) => {
-		const inbound = [...inboundQueue.values()].reverse().find((i) => !i.fulfilled);
-		if (!inbound || !identity) return;
+		if (!identity || inboundQueue.size === 0) return;
 
 		// Walk the session branch for the most recent assistant message text.
 		let lastAssistantText = "";
@@ -1497,55 +1499,54 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		let payload: any = lastAssistantText;
-		let error: string | null = null;
-		if (inbound.response_schema && typeof inbound.response_schema === "object") {
-			try {
-				payload = JSON.parse(lastAssistantText);
-			} catch {
-				error = "response not valid JSON";
-				payload = null;
-			}
-		}
+		// A long turn can absorb several stacked inbound prompts (SIO-1598):
+		// every unfulfilled inbound gets this turn's output, oldest first, or
+		// its sender's await times out forever and the stale queue entry
+		// swallows a later turn's reply.
+		const replies = buildTurnReplies([...inboundQueue.values()], lastAssistantText);
+		for (const reply of replies) {
+			const inbound = inboundQueue.get(reply.msg_id);
+			if (!inbound) continue;
 
-		const respEnv: ResponseEnvelope = {
-			type: "response",
-			msg_id: inbound.msg_id,
-			sender_session: identity.session_id,
-			sender_endpoint: identity.endpoint,
-			hops: 0,
-			timestamp: nowIso(),
-			response: payload,
-			error,
-		};
+			const respEnv: ResponseEnvelope = {
+				type: "response",
+				msg_id: reply.msg_id,
+				sender_session: identity.session_id,
+				sender_endpoint: identity.endpoint,
+				hops: 0,
+				timestamp: nowIso(),
+				response: reply.response,
+				error: reply.error,
+			};
 
-		try {
-			await sendEnvelope(inbound.sender_endpoint, respEnv);
 			try {
-				pi.appendEntry("coms-log", {
-					event: "outbound_response",
-					msg_id: inbound.msg_id,
-					error,
-				});
-			} catch {
-				// best-effort
+				await sendEnvelope(inbound.sender_endpoint, respEnv);
+				try {
+					pi.appendEntry("coms-log", {
+						event: "outbound_response",
+						msg_id: reply.msg_id,
+						error: reply.error,
+					});
+				} catch {
+					// best-effort
+				}
+			} catch (e: any) {
+				try {
+					pi.appendEntry("coms-log", {
+						event: "outbound_response_failed",
+						msg_id: reply.msg_id,
+						reason: e?.message ?? String(e),
+					});
+				} catch {
+					// best-effort
+				}
 			}
-		} catch (e: any) {
-			try {
-				pi.appendEntry("coms-log", {
-					event: "outbound_response_failed",
-					msg_id: inbound.msg_id,
-					reason: e?.message ?? String(e),
-				});
-			} catch {
-				// best-effort
-			}
-		}
 
-		inbound.fulfilled = true;
-		inboundQueue.delete(inbound.msg_id);
-		if (currentInbound && currentInbound.msg_id === inbound.msg_id) {
-			currentInbound = null;
+			inbound.fulfilled = true;
+			inboundQueue.delete(reply.msg_id);
+			if (currentInbound && currentInbound.msg_id === reply.msg_id) {
+				currentInbound = null;
+			}
 		}
 	});
 

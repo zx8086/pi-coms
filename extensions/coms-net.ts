@@ -31,7 +31,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { applyExtensionDefaults } from "./themeMap.ts";
-import { extractJsonPayload } from "./jsonPayload.ts";
+import { buildTurnReplies } from "./turnReply.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -1468,10 +1468,14 @@ export default function (pi: ExtensionAPI) {
 			"Only call this with a msg_id that YOU received as the return value of a coms_net_send call you just made.\n\n" +
 			"⚠️  Do NOT call this with a msg_id that came in via an inbound `[from <peer>] …` prompt — those msg_ids belong to the *peer's* outbound, not yours. " +
 			"To reply to an inbound message, do nothing special: just answer normally as your assistant message, " +
-			"and the extension will auto-submit your final text back to the caller when your turn ends.",
+			"and the extension will auto-submit your final text back to the caller when your turn ends.\n\n" +
+			"The reply only arrives when the target's whole turn ends. A prompt that makes the target investigate " +
+			"(paginate CloudTrail, run many tool calls) routinely takes several minutes, so keep the 30-min default " +
+			"or override with minutes, not seconds — a 45-60s timeout on an investigation prompt times out while " +
+			"the target is still working.",
 		parameters: Type.Object({
 			msg_id: Type.String({ description: "msg_id returned by coms_net_send." }),
-			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Server cap applies." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Server cap applies. Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends." })),
 		}),
 		async execute(_callId, params) {
 			const msg_id = (params as any).msg_id as string;
@@ -1606,7 +1610,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			prompt: Type.String({ description: "The prompt sent verbatim to each target." }),
 			targets: Type.Optional(Type.Array(Type.String(), { description: "Peer names. Defaults to all online/stale peers in the project." })),
-			timeout_ms: Type.Optional(Type.Number({ description: "Per-peer reply timeout (ms). Default 30 min." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Per-peer reply timeout (ms). Default 30 min. Use minutes, not seconds, for prompts that make peers investigate — replies only arrive when their whole turn ends." })),
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");
@@ -1740,8 +1744,7 @@ export default function (pi: ExtensionAPI) {
 	// ━━ agent_end: capture turn output and submit response ━━━━━━━━━━━━━━━━
 
 	pi.on("agent_end", async (_event, ctx) => {
-		const inbound = [...inboundQueue.values()].reverse().find((i) => !i.fulfilled);
-		if (!inbound || !identity) return;
+		if (!identity || inboundQueue.size === 0) return;
 
 		// Walk the session branch for the most recent assistant text.
 		let lastAssistantText = "";
@@ -1759,43 +1762,39 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		let payload: any = lastAssistantText;
-		let error: string | null = null;
-		if (inbound.response_schema && typeof inbound.response_schema === "object") {
-			const parsed = extractJsonPayload(lastAssistantText);
-			if (parsed === undefined) {
-				error = "response not valid JSON";
-				payload = null;
-			} else {
-				payload = parsed;
-			}
-		}
+		// A long turn can absorb several stacked inbound prompts (SIO-1598):
+		// every unfulfilled inbound gets this turn's output, oldest first, or
+		// its sender's await times out forever and the stale queue entry
+		// swallows a later turn's reply.
+		const replies = buildTurnReplies([...inboundQueue.values()], lastAssistantText);
+		for (const reply of replies) {
+			const req: ResponseSubmitRequest = {
+				project: identity.project,
+				responder_session: identity.session_id,
+				response: reply.response,
+				error: reply.error,
+			};
 
-		const req: ResponseSubmitRequest = {
-			project: identity.project,
-			responder_session: identity.session_id,
-			response: payload,
-			error,
-		};
-
-		try {
-			await httpFetch("POST", `/v1/messages/${encodeURIComponent(inbound.msg_id)}/response`, req);
 			try {
-				pi.appendEntry("coms-net-log", {
-					event: "response_out",
-					ts: nowIso(),
-					msg_id: inbound.msg_id,
-					error,
-				});
-			} catch { /* best-effort */ }
-		} catch (e: any) {
-			audit("response_out_failed", { msg_id: inbound.msg_id, reason: safeError(e) });
-		}
+				await httpFetch("POST", `/v1/messages/${encodeURIComponent(reply.msg_id)}/response`, req);
+				try {
+					pi.appendEntry("coms-net-log", {
+						event: "response_out",
+						ts: nowIso(),
+						msg_id: reply.msg_id,
+						error: reply.error,
+					});
+				} catch { /* best-effort */ }
+			} catch (e: any) {
+				audit("response_out_failed", { msg_id: reply.msg_id, reason: safeError(e) });
+			}
 
-		inbound.fulfilled = true;
-		inboundQueue.delete(inbound.msg_id);
-		if (currentInbound && currentInbound.msg_id === inbound.msg_id) {
-			currentInbound = null;
+			const inbound = inboundQueue.get(reply.msg_id);
+			if (inbound) inbound.fulfilled = true;
+			inboundQueue.delete(reply.msg_id);
+			if (currentInbound && currentInbound.msg_id === reply.msg_id) {
+				currentInbound = null;
+			}
 		}
 	});
 
