@@ -384,12 +384,26 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-# Already running under the right name? Then Herdr restored it; nothing to do.
-# Ask the hub rather than Herdr -- `herdr agent list` returns empty on some
-# hosts even while Pi is running, so it cannot answer this question.
-if curl -fsS -H "Authorization: Bearer $PI_COMS_NET_AUTH_TOKEN" \
-     "$PI_COMS_NET_SERVER_URL/v1/agents" 2>/dev/null \
-     | grep -q "\"name\":\"AGENT_NAME_PLACEHOLDER\""; then
+# A code update leaves a reload sentinel: the running Pi is a long-lived Herdr
+# process that survives `systemctl restart`, so after a bundle swap it is still
+# registered but still executing the OLD code from a now-deleted cwd. When the
+# sentinel is present we must tear the agent down and relaunch it from the fresh
+# clone, so the registry guard below must NOT short-circuit that (SIO-1599).
+RELOAD=0
+if [ -f "$HOME/.pi-agent-reload" ]; then
+  RELOAD=1
+  rm -f "$HOME/.pi-agent-reload"
+  echo "reload sentinel present; forcing agent relaunch from the current bundle"
+fi
+
+# Already running under the right name AND no reload pending? Then Herdr restored
+# it and it is current; nothing to do. Ask the hub rather than Herdr -- `herdr
+# agent list` returns empty on some hosts even while Pi is running, so it cannot
+# answer this question.
+if [ "$RELOAD" -eq 0 ] \
+   && curl -fsS -H "Authorization: Bearer $PI_COMS_NET_AUTH_TOKEN" \
+        "$PI_COMS_NET_SERVER_URL/v1/agents" 2>/dev/null \
+        | grep -q "\"name\":\"AGENT_NAME_PLACEHOLDER\""; then
   echo "agent already registered as AGENT_NAME_PLACEHOLDER; leaving it alone"
   exit 0
 fi
@@ -406,6 +420,20 @@ except Exception: pass'); do
   echo "closing stale workspace $ws"
   herdr workspace close "$ws" >/dev/null 2>&1 || true
 done
+
+# Closing the workspace kills the pane, but the old session's hub registration
+# lingers until its heartbeat lapses. The relaunch reuses the same --cname, so
+# wait for the old name to drop before starting, or the hub renames the new
+# session to name2 and messages keep going to the dead one.
+if [ "$RELOAD" -eq 1 ]; then
+  for i in $(seq 1 20); do
+    curl -fsS -H "Authorization: Bearer $PI_COMS_NET_AUTH_TOKEN" \
+         "$PI_COMS_NET_SERVER_URL/v1/agents" 2>/dev/null \
+         | grep -q "\"name\":\"AGENT_NAME_PLACEHOLDER\"" || { echo "old registration cleared after $i check(s)"; break; }
+    [ "$i" -eq 20 ] && echo "old registration still present after 60s; relaunching anyway" >&2
+    sleep 3
+  done
+fi
 
 # Workspace env is inherited by every pane, so Pi sees the hub URL, token, and
 # provider keys. Forward every export from .coms-env.
@@ -490,6 +518,12 @@ if [ "\$CURRENT" = "\$LATEST" ] && [ "\$LATEST" != "unknown" ]; then
   exit 0
 fi
 echo "updating pi-coms: \$CURRENT -> \$LATEST"
+# Signal start-pi-agent.sh to relaunch the agent from the fresh clone instead
+# of leaving the old Herdr-hosted process (running the previous bundle) alone.
+# Without this the code swaps on disk but never reaches the running agent
+# (SIO-1599).
+touch '$AGENT_HOME/.pi-agent-reload'
+chown '$AGENT_USER:$AGENT_USER' '$AGENT_HOME/.pi-agent-reload' 2>/dev/null || true
 # The userdata shim owns the env contract; re-running it re-fetches the
 # bundle (including this bootstrap) and restarts the services.
 bash /var/lib/cloud/instance/user-data.txt
