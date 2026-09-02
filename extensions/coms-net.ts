@@ -1468,10 +1468,14 @@ export default function (pi: ExtensionAPI) {
 			"Only call this with a msg_id that YOU received as the return value of a coms_net_send call you just made.\n\n" +
 			"⚠️  Do NOT call this with a msg_id that came in via an inbound `[from <peer>] …` prompt — those msg_ids belong to the *peer's* outbound, not yours. " +
 			"To reply to an inbound message, do nothing special: just answer normally as your assistant message, " +
-			"and the extension will auto-submit your final text back to the caller when your turn ends.",
+			"and the extension will auto-submit your final text back to the caller when your turn ends.\n\n" +
+			"The reply only arrives when the target's whole turn ends. A prompt that makes the target investigate " +
+			"(paginate CloudTrail, run many tool calls) routinely takes several minutes, so keep the 30-min default " +
+			"or override with minutes, not seconds — a 45-60s timeout on an investigation prompt times out while " +
+			"the target is still working.",
 		parameters: Type.Object({
 			msg_id: Type.String({ description: "msg_id returned by coms_net_send." }),
-			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Server cap applies." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Server cap applies. Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends." })),
 		}),
 		async execute(_callId, params) {
 			const msg_id = (params as any).msg_id as string;
@@ -1606,7 +1610,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			prompt: Type.String({ description: "The prompt sent verbatim to each target." }),
 			targets: Type.Optional(Type.Array(Type.String(), { description: "Peer names. Defaults to all online/stale peers in the project." })),
-			timeout_ms: Type.Optional(Type.Number({ description: "Per-peer reply timeout (ms). Default 30 min." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Per-peer reply timeout (ms). Default 30 min. Use minutes, not seconds, for prompts that make peers investigate — replies only arrive when their whole turn ends." })),
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");

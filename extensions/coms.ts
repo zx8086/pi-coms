@@ -1427,10 +1427,12 @@ export default function (pi: ExtensionAPI) {
 		name: "coms_await",
 		label: "Coms Await",
 		description:
-			"Block until a pending coms_send reply lands or the timeout fires. Default timeout 30 minutes (PI_COMS_TIMEOUT_MS).",
+			"Block until a pending coms_send reply lands or the timeout fires. Default timeout 30 minutes (PI_COMS_TIMEOUT_MS). " +
+			"The reply only arrives when the target's whole turn ends, so a prompt that makes it investigate " +
+			"routinely takes several minutes — keep the default or override with minutes, not seconds.",
 		parameters: Type.Object({
 			msg_id: Type.String({ description: "msg_id returned by coms_send." }),
-			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms)." })),
+			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends." })),
 		}),
 		async execute(_callId, params) {
 			const entry = pendingReplies.get(params.msg_id);
