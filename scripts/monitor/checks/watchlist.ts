@@ -20,6 +20,18 @@ export const DEFAULT_WATCHLIST = [
 	"PutRolePolicy",
 	"PutUserPolicy",
 	"DeleteFlowLogs",
+	// SIO-1597 additions: egress/revocation, routing, and S3 exposure writes.
+	// ModifyDBInstance is deliberately absent; the resource-drift check catches
+	// RDS changes within 15 minutes while this list runs daily.
+	"AuthorizeSecurityGroupEgress",
+	"RevokeSecurityGroupIngress",
+	"RevokeSecurityGroupEgress",
+	"CreateRoute",
+	"ReplaceRoute",
+	"DeleteRoute",
+	"DeleteRouteTable",
+	"DeleteBucketPolicy",
+	"PutPublicAccessBlock",
 ];
 
 const WATERMARK_KEY = "watchlist";

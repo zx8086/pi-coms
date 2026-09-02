@@ -11,6 +11,8 @@ import { CloudWatchClient, DescribeAlarmsCommand } from "@aws-sdk/client-cloudwa
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { CostExplorerClient } from "@aws-sdk/client-cost-explorer";
 import { EC2Client } from "@aws-sdk/client-ec2";
+import { LambdaClient } from "@aws-sdk/client-lambda";
+import { RDSClient } from "@aws-sdk/client-rds";
 import { STSClient } from "@aws-sdk/client-sts";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -21,6 +23,7 @@ import { checkDrift } from "./monitor/checks/drift.ts";
 import { checkIdentity, type GateResult } from "./monitor/checks/identity.ts";
 import { checkIngestion } from "./monitor/checks/ingestion.ts";
 import { checkLogs } from "./monitor/checks/logs.ts";
+import { checkResourceDrift } from "./monitor/checks/resource-drift.ts";
 import { checkTrail } from "./monitor/checks/trail.ts";
 import { checkWatchlist } from "./monitor/checks/watchlist.ts";
 import { MonitorComs } from "./monitor/coms.ts";
@@ -220,6 +223,8 @@ function main(): void {
 	const sts = new STSClient({ region });
 	const cloudtrail = new CloudTrailClient({ region });
 	const acm = new ACMClient({ region });
+	const rds = new RDSClient({ region });
+	const lambda = new LambdaClient({ region });
 	const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
 
 	const gate = {
@@ -298,6 +303,7 @@ function main(): void {
 					}),
 			},
 			{ name: "drift", run: () => checkDrift(ec2, state) },
+			{ name: "resource-drift", run: () => checkResourceDrift(ec2, rds, lambda, state) },
 		],
 		state,
 		investigate,
