@@ -66,9 +66,9 @@ The hub used to store nothing durable. It now persists **prompt and response bod
 |----------|-------|
 | Peer name | Code default `monitor-aws-<account_id>`; the bootstrap sets `monitor-<alias>` (e.g. `monitor-eu-oit-dev`) on deployed hosts. Registered `--explicit` (hidden from lists and broadcasts unless named) |
 | Scheduling | In-process `Bun.cron()` (requires Bun >= 1.4): `*/15 * * * *` for alarms/logs/drift, `7 * * * *` for the ingestion heartbeat (minute 7 keeps its guard off the */15 boundary), `@daily` for cost/trail/certs/watchlist + digest |
-| State | `bun:sqlite` at `~/.pi/monitor/state.db`: watermarks, alert fingerprints, instance snapshots, cost history, journal, unsent-report queue |
+| State | `bun:sqlite` at `~/.pi/monitor/state.db`: watermarks, alert fingerprints, resource snapshots (instances, security groups, route tables, RDS, Lambda), cost history, journal, unsent-report queue |
 | Model usage | None inside the monitor. Zero token spend when no findings |
-| Modules | `scripts/monitor/checks/{alarms,logs,drift,cost}.ts`, `state.ts`, `report.ts`, `coms.ts` (headless coms-net client) |
+| Modules | `scripts/monitor/checks/{alarms,logs,drift,resource-drift,cost}.ts`, `state.ts`, `report.ts`, `coms.ts` (headless coms-net client) |
 
 ### Checks
 
@@ -82,11 +82,12 @@ Every cycle starts with a T0 gate: `sts:GetCallerIdentity` compared against `AWS
 | Alarms | 15 min | `DescribeAlarms`; transitions into ALARM (critical) / INSUFFICIENT_DATA (info -- nightly scale-to-zero flaps these by design), recovery to OK (info) | Alarm name + state: a still-firing alarm alerts once, and only a state change re-arms it |
 | Log errors | 15 min | `FilterLogEvents` since a per-group watermark, pattern `?ERROR ?Exception`, grouped by a normalized message signature (timestamps, UUIDs, hex, digits, and mixed-alphanumeric ids all collapse); capped at 3 signatures/group and 10 warn findings/cycle, overflow journaled as one info finding. A group denied by the name-scoped log IAM is one info scoping finding, and the scan continues | Group + signature hash; re-alerts after 24 h |
 | Drift/health | 15 min | Instance state changes vs the stored snapshot (stop/terminate = warn), failed status checks | Edge-triggered by the snapshot diff; status-check fingerprints clear on recovery |
+| Resource drift | 15 min | Snapshot diffs beyond instances (SIO-1597): security-group ingress+egress rules (change = warn), route-table routes (change = warn), RDS instance settings (public flip = critical, status = warn, class/version = info), Lambda config from one paginated `ListFunctions` (role = warn, rest info). New/deleted resources are info; a failing sub-scan is one fingerprinted info finding and the other scans still run | Edge-triggered by the snapshot diffs; scan-failure fingerprints clear on recovery |
 | Cost | daily | Yesterday vs the trailing 14-day baseline; alerts only when over by **both** +20% and +$1 | Once per date |
 | Ingestion | hourly | Metrics Insights `IncomingLogEvents` per log group; warn when the last full hour is 0 against a same-hour-of-day 7-day median >= 10 (so the nightly scale-to-zero is silent by construction); recovery info. The inverse of the log-errors check: it finds logging that **stopped** | Per group, alert once until recovery |
 | Trail | daily | `GetTrailStatus` per trail: `IsLogging=false` critical, delivery error warn, zero trails info; recovery info. Shadow org trails that deny status reads are tolerated | Per trail + condition, 24 h re-alert |
 | Certs | daily | ACM `NotAfter`: < 30 d warn, < 7 d critical (managed renewal happens ~60 d out, so < 30 d means renewal is failing) | Per cert + severity, 7 d re-alert |
-| Watchlist | daily | `cloudtrail:LookupEvents` for scary write events (StopLogging, SG ingress, IAM edits, ...); one call per event name, watermarked. The monitor is read-only, so its own CloudTrail echo can never match | Per event id |
+| Watchlist | daily | `cloudtrail:LookupEvents` for scary write events (StopLogging, SG ingress/egress and revocations, route changes, S3 exposure, IAM edits, ...); one call per event name, watermarked. `ModifyDBInstance` is deliberately absent: resource drift catches RDS changes within 15 minutes while this list runs daily. The monitor is read-only, so its own CloudTrail echo can never match | Per event id |
 
 Watermarks, fingerprints, and snapshots all persist in `state.db`, so a monitor restart produces neither duplicate nor missed alerts.
 

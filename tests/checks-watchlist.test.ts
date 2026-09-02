@@ -1,6 +1,6 @@
 // tests/checks-watchlist.test.ts
 import { describe, expect, test } from "bun:test";
-import { checkWatchlist } from "../scripts/monitor/checks/watchlist.ts";
+import { checkWatchlist, DEFAULT_WATCHLIST } from "../scripts/monitor/checks/watchlist.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 const NOW = Date.parse("2026-09-01T12:00:00Z");
@@ -64,5 +64,22 @@ describe("checkWatchlist", () => {
 		const state = new MonitorState(":memory:");
 		const out = await checkWatchlist(fakeClient({}), state, { now: NOW, events: ["StopLogging"] });
 		expect(out).toHaveLength(0);
+	});
+
+	test("default watchlist covers egress, routing, and S3 exposure writes (SIO-1597)", () => {
+		for (const name of [
+			"AuthorizeSecurityGroupEgress",
+			"RevokeSecurityGroupIngress",
+			"RevokeSecurityGroupEgress",
+			"CreateRoute",
+			"ReplaceRoute",
+			"DeleteRoute",
+			"DeleteRouteTable",
+			"DeleteBucketPolicy",
+			"PutPublicAccessBlock",
+		]) {
+			expect(DEFAULT_WATCHLIST).toContain(name);
+		}
+		expect(DEFAULT_WATCHLIST).not.toContain("ModifyDBInstance");
 	});
 });
