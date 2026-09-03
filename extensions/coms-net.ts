@@ -33,6 +33,7 @@ import { Type } from "@sinclair/typebox";
 import { applyExtensionDefaults } from "./themeMap.ts";
 import { buildTurnReplies } from "./turnReply.ts";
 import { buildIdentityNote } from "./identityNote.ts";
+import { formatInbox } from "./inboxFormat.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -1431,32 +1432,43 @@ export default function (pi: ExtensionAPI) {
 			"Read a durable inbox: long-TTL mailbox messages (e.g. monitor reports) are retained on the hub until their TTL expires and stay readable by everyone. " +
 			"Non-destructive and identical for every reader, so any operator connecting at any time sees the same messages on demand. " +
 			"Defaults to your own registered name; pass name to read a shared inbox like \"ops\". " +
-			"Use since with a msg_id to fetch only newer messages.",
+			"Use since with a msg_id to fetch only newer messages. " +
+			"Listing bodies are previews; pass msg_id to read one message in full (e.g. a monitor incident report whose findings run past the preview).",
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: "Inbox name to read (default: your own registered name)." })),
 			limit: Type.Optional(Type.Number({ description: "Maximum messages to return (default 10, server cap 100)." })),
 			since: Type.Optional(Type.String({ description: "Only messages newer than this msg_id (ascending)." })),
+			msg_id: Type.Optional(Type.String({ description: "Return only this message, with its full untruncated body." })),
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");
 			const name = ((params as any).name as string | undefined) || identity.name;
-			const limit = typeof (params as any).limit === "number" && (params as any).limit > 0 ? (params as any).limit : 10;
+			const msgId = (params as any).msg_id as string | undefined;
+			// A full-body read must find its target: search at the server cap
+			// unless the caller narrowed the fetch explicitly.
+			const limit =
+				typeof (params as any).limit === "number" && (params as any).limit > 0
+					? (params as any).limit
+					: msgId ? 100 : 10;
 			const since = (params as any).since as string | undefined;
 			const qs =
 				`?project=${encodeURIComponent(identity.project)}&name=${encodeURIComponent(name)}&limit=${limit}` +
 				(since ? `&since=${encodeURIComponent(since)}` : "");
 			const resp = await httpFetch("GET", `/v1/mailbox${qs}`);
 			const messages: any[] = Array.isArray(resp?.messages) ? resp.messages : [];
-			const lines = messages.length === 0
-				? `Inbox "${name}" is empty.`
-				: messages.map((m) => {
-					const body: string = typeof m.prompt === "string" ? m.prompt : "";
-					const preview = body.slice(0, 400).replace(/\n/g, "\n  ");
-					const cut = body.length > 400 ? " …" : "";
-					return `[${m.created_at}] from ${m.sender_name} (${m.status}) msg_id ${m.msg_id}\n  ${preview}${cut}`;
-				}).join("\n\n");
+			const text = formatInbox(
+				name,
+				messages.map((m) => ({
+					msg_id: String(m.msg_id ?? ""),
+					sender_name: String(m.sender_name ?? ""),
+					status: String(m.status ?? ""),
+					created_at: String(m.created_at ?? ""),
+					prompt: typeof m.prompt === "string" ? m.prompt : "",
+				})),
+				{ msgId },
+			);
 			return {
-				content: [{ type: "text" as const, text: `Inbox "${name}": ${messages.length} message(s)\n\n${lines}` }],
+				content: [{ type: "text" as const, text }],
 				details: { name, count: messages.length, messages },
 			};
 		},

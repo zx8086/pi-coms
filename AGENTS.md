@@ -78,6 +78,10 @@ operator role.
   the durable inbox. It deliberately does not start a turn. Read it only
   when the operator asks, with `coms_net_inbox` (defaults to your own name;
   ULID msg_ids sort by time, `since` continues from a known id).
+- Inbox listings show preview bodies. A message ending in `…` was cut:
+  before summarizing it, re-read it in full with `coms_net_inbox` and its
+  `msg_id`. Never report a finding count or family from a truncated body
+  as if you had read the whole message.
 
 ## Reading monitor reports
 
