@@ -16,7 +16,6 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-cod
 import { Text } from "@mariozechner/pi-tui";
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { applyExtensionDefaults } from "./themeMap.ts";
 import { buildTurnReplies, outboundHops } from "./turnReply.ts";
 import { buildIdentityNote } from "./identityNote.ts";
 import { formatInbox } from "./inboxFormat.ts";
@@ -924,7 +923,6 @@ export default function (pi: ExtensionAPI) {
 	// ━━ session_start ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	pi.on("session_start", async (_event, ctx) => {
-		applyExtensionDefaults(import.meta.url, ctx);
 		currentCtx = ctx;
 
 		// 1. Resolve identity from CLI > frontmatter > defaults.

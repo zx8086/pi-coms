@@ -3,10 +3,6 @@ set dotenv-load := true
 default:
     @just --list
 
-# Plain Pi with the minimal footer
-pi:
-    pi -e extensions/minimal.ts
-
 # Auto-kills any stale process holding the pinned port first.
 
 # Start a local coms-net hub (binds 127.0.0.1, OS-claimed port unless PI_COMS_NET_PORT is set)

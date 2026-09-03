@@ -24,7 +24,6 @@ Peer-to-peer messaging between Pi Coding Agent instances (`coms-net` over HTTP/S
 - Replies are automatic: an inbound prompt triggers a turn and the final assistant message is submitted back to the caller. Tools must never be used to reply (ping-pong loop guard is in the tool descriptions).
 - Safety rails: hop limit (`PI_COMS_NET_MAX_HOPS`, default 5), audit log without prompt bodies, heartbeat/stale detection, localhost-only bind unless an auth token is set, 1 MiB request body cap, project names restricted to plain directory names.
 - Auth: single shared token by default; directory mode (`PI_COMS_NET_AUTH_SSM_PATH` or `PI_COMS_NET_AUTH_FILE`) gives per-principal tokens with name binding, session ownership (only the registering principal may heartbeat, stream, delete, send as, or answer for a session), and refresh-based revocation; admin via `just token-create/revoke/list`.
-- `extensions/themeMap.ts` is a shared module (not an extension): every extension calls `applyExtensionDefaults(import.meta.url, ctx)` in `session_start`. Theme JSON lives in `~/.pi/agent/themes/`.
 
 ## Deployment (`deploy/`)
 
