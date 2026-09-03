@@ -145,7 +145,6 @@ interface InboundContext {
 
 interface PendingReply {
 	resolve: (value: { response?: any; error?: string | null }) => void;
-	reject: (err: Error) => void;
 	promise: Promise<{ response?: any; error?: string | null }>;
 	result?: { response?: any; error?: string | null };
 	target_name?: string;
@@ -429,6 +428,18 @@ export default function (pi: ExtensionAPI) {
 	let sseUrlPath: string | null = null;
 	const peerCards: Map<string, AgentCard> = new Map();
 	const pendingReplies: Map<string, PendingReply> = new Map();
+	// Resolved entries stay in the map so coms_net_get answers locally, but a
+	// fleet agent runs for weeks: cap by insertion order, the hub's
+	// /v1/messages/:id lookup covers anything evicted (SIO-1612).
+	const PENDING_CAP = 200;
+	function rememberPending(msg_id: string, entry: PendingReply): void {
+		pendingReplies.set(msg_id, entry);
+		while (pendingReplies.size > PENDING_CAP) {
+			const oldest = pendingReplies.keys().next().value;
+			if (oldest === undefined) break;
+			pendingReplies.delete(oldest);
+		}
+	}
 	const inboundQueue: Map<string, InboundContext> = new Map();
 	let sseAbort: AbortController | null = null;
 	let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -1289,14 +1300,11 @@ export default function (pi: ExtensionAPI) {
 
 			// Park a pending entry that the SSE `response` event will resolve.
 			let resolveFn!: (v: { response?: any; error?: string | null }) => void;
-			let rejectFn!: (e: Error) => void;
-			const promise = new Promise<{ response?: any; error?: string | null }>((res, rej) => {
+			const promise = new Promise<{ response?: any; error?: string | null }>((res) => {
 				resolveFn = res;
-				rejectFn = rej;
 			});
-			pendingReplies.set(msg_id, {
+			rememberPending(msg_id, {
 				resolve: resolveFn,
-				reject: rejectFn,
 				promise,
 				target_name: params.target,
 				target_session,
@@ -1682,14 +1690,11 @@ export default function (pi: ExtensionAPI) {
 					};
 					const resp = await httpFetch("POST", "/v1/messages", req) as SendResponse;
 					let resolveFn!: (v: { response?: any; error?: string | null }) => void;
-					let rejectFn!: (e: Error) => void;
-					const promise = new Promise<{ response?: any; error?: string | null }>((res, rej) => {
+					const promise = new Promise<{ response?: any; error?: string | null }>((res) => {
 						resolveFn = res;
-						rejectFn = rej;
 					});
-					pendingReplies.set(resp.msg_id, {
+					rememberPending(resp.msg_id, {
 						resolve: resolveFn,
-						reject: rejectFn,
 						promise,
 						target_name: target,
 						target_session: resp.target_session,

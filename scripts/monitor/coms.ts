@@ -5,6 +5,9 @@
 // and sends messages with optional ttl_ms for mailbox delivery.
 import * as crypto from "node:crypto";
 
+// Bound on parked reply entries; the hub answers /v1/messages/:id for evicted ids.
+const PENDING_CAP = 200;
+
 export type InboundPrompt = {
 	msg_id: string;
 	sender_name: string;
@@ -216,10 +219,12 @@ export class MonitorComs {
 		}
 	}
 
+	// Fire-and-forget sends (reports, digests) must not park a pending entry:
+	// nothing would ever consume it (SIO-1612).
 	async send(
 		target: string,
 		prompt: string,
-		opts: { ttl_ms?: number; response_schema?: object } = {},
+		opts: { ttl_ms?: number; response_schema?: object; expectReply?: boolean } = {},
 	): Promise<{ msg_id: string; status: string }> {
 		const resp = await this.http("POST", "/v1/messages", {
 			project: this.opts.project,
@@ -232,12 +237,23 @@ export class MonitorComs {
 			hops: 0,
 			...(opts.ttl_ms ? { ttl_ms: opts.ttl_ms } : {}),
 		});
-		let resolve!: (v: { response?: any; error?: string | null }) => void;
-		const promise = new Promise<{ response?: any; error?: string | null }>((res) => {
-			resolve = res;
-		});
-		this.pending.set(resp.msg_id, { promise, resolve });
+		if (opts.expectReply !== false) {
+			let resolve!: (v: { response?: any; error?: string | null }) => void;
+			const promise = new Promise<{ response?: any; error?: string | null }>((res) => {
+				resolve = res;
+			});
+			this.pending.set(resp.msg_id, { promise, resolve });
+			while (this.pending.size > PENDING_CAP) {
+				const oldest = this.pending.keys().next().value;
+				if (oldest === undefined) break;
+				this.pending.delete(oldest);
+			}
+		}
 		return { msg_id: resp.msg_id, status: resp.status };
+	}
+
+	pendingSize(): number {
+		return this.pending.size;
 	}
 
 	async awaitReply(msg_id: string, timeoutMs: number): Promise<{ response?: any; error?: string | null }> {

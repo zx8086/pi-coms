@@ -294,7 +294,7 @@ function main(): void {
 	};
 
 	const report = async (text: string): Promise<void> => {
-		await coms.send(REPORT_TO, text, { ttl_ms: REPORT_TTL_MS });
+		await coms.send(REPORT_TO, text, { ttl_ms: REPORT_TTL_MS, expectReply: false });
 	};
 
 	const fifteenDeps: CycleDeps = {
