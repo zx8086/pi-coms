@@ -5,7 +5,7 @@
 // the older senders' awaits otherwise time out forever and the stale queue
 // entries swallow later turns' output.
 import { expect, test } from "bun:test";
-import { buildTurnReplies } from "../extensions/turnReply";
+import { buildTurnReplies, outboundHops } from "../extensions/turnReply";
 
 const text = "Investigation complete: no observed WAF changes in the last 72h.";
 
@@ -49,6 +49,27 @@ test("skips already-fulfilled inbounds", () => {
 
 test("empty queue yields no replies", () => {
 	expect(buildTurnReplies([], text)).toEqual([]);
+});
+
+// SIO-1611: outbound hops derive from every unfulfilled inbound of the turn,
+// not from whichever prompt arrived last.
+test("outboundHops is 0 for a user-started turn", () => {
+	expect(outboundHops([])).toBe(0);
+});
+
+test("outboundHops is one past the deepest unfulfilled inbound", () => {
+	expect(outboundHops([
+		{ hops: 4, fulfilled: false },
+		{ hops: 0, fulfilled: false },
+	])).toBe(5);
+});
+
+test("outboundHops ignores fulfilled inbounds", () => {
+	expect(outboundHops([
+		{ hops: 4, fulfilled: true },
+		{ hops: 1, fulfilled: false },
+	])).toBe(2);
+	expect(outboundHops([{ hops: 4, fulfilled: true }])).toBe(0);
 });
 
 test("schema inbound gets JSON extracted from fenced output", () => {

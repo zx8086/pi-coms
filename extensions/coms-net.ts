@@ -31,7 +31,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { applyExtensionDefaults } from "./themeMap.ts";
-import { buildTurnReplies } from "./turnReply.ts";
+import { buildTurnReplies, outboundHops } from "./turnReply.ts";
 import { buildIdentityNote } from "./identityNote.ts";
 import { formatInbox } from "./inboxFormat.ts";
 import * as fs from "node:fs";
@@ -436,7 +436,6 @@ export default function (pi: ExtensionAPI) {
 	let reconnectAttempts = 0;
 	let notifiedReconnectCap = false;
 	let currentCtx: ExtensionContext | null = null;
-	let currentInbound: InboundContext | null = null;
 	let includeExplicit = false;
 	let displayProject: string | null = null;
 	let lastWidgetSnapshot = "";
@@ -708,7 +707,6 @@ export default function (pi: ExtensionAPI) {
 			fulfilled: false,
 		};
 		inboundQueue.set(msg_id, inbound);
-		currentInbound = inbound;
 
 		// The schema must be in the turn content: `details` is metadata the model
 		// never sees, and a schema the recipient cannot read is a contract it can
@@ -748,7 +746,6 @@ export default function (pi: ExtensionAPI) {
 			} catch { /* best-effort */ }
 		} catch (err) {
 			inboundQueue.delete(msg_id);
-			currentInbound = null;
 			audit("prompt_in_failed", { msg_id, reason: safeError(err) });
 		}
 	}
@@ -1261,7 +1258,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");
 
-			const hops = currentInbound ? currentInbound.hops + 1 : 0;
+			const hops = outboundHops(inboundQueue.values());
 			if (hops >= MAX_HOPS) {
 				throw new Error(`coms-net: hop limit reached (${hops} >= ${MAX_HOPS})`);
 			}
@@ -1643,7 +1640,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");
 
-			const hops = currentInbound ? currentInbound.hops + 1 : 0;
+			const hops = outboundHops(inboundQueue.values());
 			if (hops >= MAX_HOPS) {
 				throw new Error(`coms-net: hop limit reached (${hops} >= ${MAX_HOPS})`);
 			}
@@ -1793,16 +1790,24 @@ export default function (pi: ExtensionAPI) {
 		// A long turn can absorb several stacked inbound prompts (SIO-1598):
 		// every unfulfilled inbound gets this turn's output, oldest first, or
 		// its sender's await times out forever and the stale queue entry
-		// swallows a later turn's reply.
+		// swallows a later turn's reply. Claim the queue entries before any
+		// await so a second agent_end cannot submit the same replies again,
+		// then post them concurrently (SIO-1611).
 		const replies = buildTurnReplies([...inboundQueue.values()], lastAssistantText);
 		for (const reply of replies) {
+			const inbound = inboundQueue.get(reply.msg_id);
+			if (inbound) inbound.fulfilled = true;
+			inboundQueue.delete(reply.msg_id);
+		}
+		const project = identity.project;
+		const responderSession = identity.session_id;
+		await Promise.all(replies.map(async (reply) => {
 			const req: ResponseSubmitRequest = {
-				project: identity.project,
-				responder_session: identity.session_id,
+				project,
+				responder_session: responderSession,
 				response: reply.response,
 				error: reply.error,
 			};
-
 			try {
 				await httpFetch("POST", `/v1/messages/${encodeURIComponent(reply.msg_id)}/response`, req);
 				try {
@@ -1816,14 +1821,7 @@ export default function (pi: ExtensionAPI) {
 			} catch (e: any) {
 				audit("response_out_failed", { msg_id: reply.msg_id, reason: safeError(e) });
 			}
-
-			const inbound = inboundQueue.get(reply.msg_id);
-			if (inbound) inbound.fulfilled = true;
-			inboundQueue.delete(reply.msg_id);
-			if (currentInbound && currentInbound.msg_id === reply.msg_id) {
-				currentInbound = null;
-			}
-		}
+		}));
 	});
 
 	// ━━ /coms-net slash command ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
