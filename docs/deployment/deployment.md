@@ -25,10 +25,10 @@ eu-oit-dev + monitor ────────────────┘        
 | Shared bootstrap | Every agent host | `deploy/bootstrap/agent-bootstrap.sh` |
 | Fleet distribution | S3 bucket in shared-services | `deploy/publish-fleet.sh`, State Manager convergence |
 
-All install and launch logic lives in the shared bootstrap, parameterized by
-`SECRETS_SOURCE=aws|file`; the userdata shim only sets the environment
-contract documented at the top of `deploy/bootstrap/agent-bootstrap.sh` and
-hands off.
+All install and launch logic lives in the shared bootstrap; the userdata
+shim only sets the environment contract documented at the top of
+`deploy/bootstrap/agent-bootstrap.sh` and hands off. Hard-won operational
+pitfalls are collected in [operations-gotchas.md](operations-gotchas.md).
 
 ## Accounts and roots
 
@@ -48,9 +48,9 @@ bootstrap, not in terraform/userdata (for example `PI_MONITOR_REPORT_TO`).
 
 ## Code distribution: the fleet bundle
 
-Development stays on GitHub; fleet hosts never talk to it. Merges to `main`
-are published as a bundle to a versioned S3 bucket, and hosts converge from
-inside the network:
+Development stays on GitHub; fleet hosts never talk to it. `main` is
+published as a bundle to a versioned S3 bucket (a manual step today, see
+below), and hosts converge from inside the network:
 
 | Stage | Mechanism |
 |-------|-----------|

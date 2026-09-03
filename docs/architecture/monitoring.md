@@ -2,7 +2,7 @@
 
 Proactive monitoring of each AWS account by its own agent host, with durable delivery of reports to the operator. Two cooperating pieces, added together because one is useless without the other: the monitor detects issues on a schedule, and the hub mailbox guarantees its reports survive until the operator's next session -- the operator's laptop is usually offline when a check runs.
 
-Design record: [`docs/superpowers/specs/2026-08-30-aws-monitor-design.md`](../superpowers/specs/2026-08-30-aws-monitor-design.md) (SIO-1575).
+Design record: SIO-1575 (the original spec and implementation plan live in git history under `docs/superpowers/`, removed 2026-09-03).
 
 ```
 +------------------+   15min/hourly/daily +------------------+
@@ -172,7 +172,7 @@ Everything fits the existing role except two named additions in `deploy/modules/
 
 `bun test` runs the repository's test suite (`tests/`): unit tests for every check family, monitor state, report formatting, and the run cycle (investigation fallback, unsent retry, overlap guard); integration tests that spawn the real hub as a subprocess with `HOME` in a temp dir to cover mailbox queueing, oldest-first flush, restart recovery, and the headless coms client end to end.
 
-The manual end-to-end drill (force one finding per family on a live account, verify mailbox delivery and the digest) is documented in the plan: [`docs/superpowers/plans/2026-08-30-aws-monitor.md`](../superpowers/plans/2026-08-30-aws-monitor.md), Task 15.
+The manual end-to-end drill after a monitor change: force one finding per family on a live account (a test alarm transition, a log line matching the error filter, a tag change on a watched resource), send `run-checks` to that account's monitor, and verify the report lands in the `ops` inbox and the next digest counts it.
 
 ## See Also
 
