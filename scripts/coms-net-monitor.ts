@@ -33,8 +33,10 @@ import {
 	type Finding,
 	formatDigest,
 	formatIncidentReport,
+	formatSuppressionReview,
 	notablesFromJournal,
 	parseDiagnoses,
+	suppressionReviewFromJournal,
 } from "./monitor/report.ts";
 import { MonitorState } from "./monitor/state.ts";
 
@@ -48,6 +50,10 @@ const CHECK_CRON = process.env.PI_MONITOR_CHECK_CRON ?? "*/15 * * * *";
 // collide with the check guard (see the midnight-collision note below).
 const HOURLY_CRON = process.env.PI_MONITOR_HOURLY_CRON ?? "7 * * * *";
 const DAILY_CRON = process.env.PI_MONITOR_DAILY_CRON ?? "@daily";
+// Anti-masking cadence: the ledger hides findings by design, so what it ate
+// gets re-surfaced on a schedule. Monthly cadence: cron "0 0 1 * *", window 31.
+const REVIEW_CRON = process.env.PI_MONITOR_REVIEW_CRON ?? "@weekly";
+const REVIEW_WINDOW_DAYS = Number(process.env.PI_MONITOR_REVIEW_WINDOW_DAYS ?? 7);
 const INVESTIGATE_TARGET = process.env.PI_MONITOR_INVESTIGATE_TARGET ?? `aws-${ACCOUNT_ID}`;
 const INVESTIGATE_TIMEOUT_MS = Number(process.env.PI_MONITOR_INVESTIGATE_TIMEOUT_MS ?? 300_000);
 const INVESTIGATE_PER_FINDING_MS = Number(
@@ -366,6 +372,26 @@ function main(): void {
 		});
 	};
 
+	const buildSuppressionReview = (): string =>
+		formatSuppressionReview({
+			accountId: ACCOUNT_ID,
+			windowDays: REVIEW_WINDOW_DAYS,
+			entries: suppressionReviewFromJournal(
+				state.listSuppressions(),
+				state.journalRows(REVIEW_WINDOW_DAYS * 86_400_000, "suppressed_finding"),
+			),
+		});
+
+	const suppressionReview = async (): Promise<void> => {
+		const text = buildSuppressionReview();
+		try {
+			await report(text);
+		} catch (e: any) {
+			state.queueUnsent(REPORT_TO, text, REPORT_TTL_MS);
+			log(`suppression review send failed, queued: ${e?.message ?? e}`);
+		}
+	};
+
 	const dailyDigest = async (): Promise<void> => {
 		const dailyDeps: CycleDeps = {
 			gate,
@@ -426,6 +452,7 @@ function main(): void {
 			return `monitor ${MONITOR_NAME} online. last run: ${lastRun ? `${lastRun.ts} ${lastRun.payload}` : "never"}. last 24h: ${day24} finding(s), ${sup24} suppressed, ${err24} check error(s). unsent reports: ${state.unsent().length}`;
 		}
 		if (cmd === "digest") return buildDigest();
+		if (cmd === "review") return buildSuppressionReview();
 		if (cmd.startsWith("history")) {
 			const rows = state.journalRows(7 * 86_400_000, "finding").slice(-20);
 			return rows.length === 0
@@ -457,17 +484,19 @@ function main(): void {
 			state.addSuppression(pattern, reason);
 			return `suppressed: ${pattern} (${reason})`;
 		}
-		return "unknown command. available: run-checks, status, digest, history, suppressions, suppress <pattern> | <reason>, unsuppress <pattern>";
+		return "unknown command. available: run-checks, status, digest, review, history, suppressions, suppress <pattern> | <reason>, unsuppress <pattern>";
 	};
 
 	void (async () => {
 		await coms.start();
 		log(
-			`registered as ${coms.name}; checks ${CHECK_CRON}; hourly ${HOURLY_CRON}; daily ${DAILY_CRON}; reporting to ${REPORT_TO}`,
+			`registered as ${coms.name}; checks ${CHECK_CRON}; hourly ${HOURLY_CRON}; daily ${DAILY_CRON}; review ${REVIEW_CRON}; reporting to ${REPORT_TO}`,
 		);
 		Bun.cron(CHECK_CRON, () => runChecksNow());
 		Bun.cron(HOURLY_CRON, () => runHourlyNow());
 		Bun.cron(DAILY_CRON, () => dailyGuard(dailyDigest));
+		// No journal writes and no checks: needs no guard against the others.
+		Bun.cron(REVIEW_CRON, () => void suppressionReview());
 	})();
 
 	const shutdown = () => {

@@ -34,7 +34,7 @@ operator role.
 - Each account also runs `monitor-<alias>`: a deterministic monitor,
   registered as an explicit peer, so it is hidden from the pool widget and
   from broadcasts. Address it by full name for commands: `run-checks`,
-  `status`, `digest`, `history`, `suppressions`,
+  `status`, `digest`, `review`, `history`, `suppressions`,
   `suppress <pattern> | <reason>`, `unsuppress <pattern>`.
 - Agents are read-only by design. Never instruct one to change
   infrastructure, and never ask one for secret values -- their access is
@@ -111,6 +111,12 @@ operator role.
   re-triaging it every report. Suppressed findings stay in the journal and
   show as a count; `suppressions` lists the ledger. Suppress only on the
   operator's decision, never on your own.
+- A weekly suppression review lands in the inbox (also on demand via the
+  monitor's `review` command): every ledger entry with its match count and
+  sample keys for the window. Read it against masking risk: an entry with
+  zero matches is an unsuppress candidate, and a high count is a prompt to
+  re-check that the pattern still only covers accepted noise. Raise both
+  kinds to the operator; the decision is theirs.
 - The digest's `bundle:` line is the deploy canary. After a fleet deploy,
   agents whose digests still show the old bundle version are running stale
   code.

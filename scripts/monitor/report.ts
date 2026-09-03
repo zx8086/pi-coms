@@ -135,6 +135,63 @@ export function notablesFromJournal(rows: { payload: string }[]): DigestNotable[
 	return notables;
 }
 
+export type SuppressionLedgerEntry = { pattern: string; reason: string; created_at: string };
+export type SuppressionReviewEntry = SuppressionLedgerEntry & {
+	matches: number;
+	sampleKeys: string[];
+};
+
+const REVIEW_SAMPLE_CAP = 3;
+
+export function suppressionReviewFromJournal(
+	ledger: SuppressionLedgerEntry[],
+	rows: { payload: string }[],
+): SuppressionReviewEntry[] {
+	const byPattern = new Map<string, { matches: number; sampleKeys: string[] }>();
+	for (const e of ledger) byPattern.set(e.pattern, { matches: 0, sampleKeys: [] });
+	for (const r of rows) {
+		let payload: { suppressed_by?: unknown; dedup_key?: unknown };
+		try {
+			payload = JSON.parse(r.payload);
+		} catch {
+			continue;
+		}
+		const entry = typeof payload.suppressed_by === "string" ? byPattern.get(payload.suppressed_by) : undefined;
+		if (!entry) continue;
+		entry.matches++;
+		const key = typeof payload.dedup_key === "string" ? payload.dedup_key : null;
+		if (key && entry.sampleKeys.length < REVIEW_SAMPLE_CAP && !entry.sampleKeys.includes(key)) {
+			entry.sampleKeys.push(key);
+		}
+	}
+	return ledger.map((e) => ({ ...e, ...(byPattern.get(e.pattern) ?? { matches: 0, sampleKeys: [] }) }));
+}
+
+// The anti-masking counterweight to the ledger: what each suppression ate in
+// the window, so accepted noise gets re-examined instead of forgotten.
+export function formatSuppressionReview(input: {
+	accountId: string;
+	windowDays: number;
+	entries: SuppressionReviewEntry[];
+}): string {
+	const lines = [`[info] aws-${input.accountId} suppression review (last ${input.windowDays}d)`, ""];
+	if (input.entries.length === 0) {
+		lines.push("suppression ledger is empty; nothing is being masked.");
+		return lines.join("\n");
+	}
+	lines.push(`- ledger entries: ${input.entries.length}`);
+	for (const e of input.entries) {
+		lines.push(`- ${e.pattern} -- ${e.reason} (since ${e.created_at})`);
+		if (e.matches === 0) {
+			lines.push(`  no matches in ${input.windowDays}d; candidate for unsuppress`);
+		} else {
+			const samples = e.sampleKeys.length > 0 ? `, e.g. ${e.sampleKeys.join(", ")}` : "";
+			lines.push(`  matches last ${input.windowDays}d: ${e.matches}${samples}`);
+		}
+	}
+	return lines.join("\n");
+}
+
 export type DigestInput = {
 	accountId: string;
 	since: string;
