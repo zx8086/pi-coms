@@ -4,10 +4,10 @@
 // keep mail out of the model -- mailbox mail is read on demand via the inbox,
 // only interactive (short-TTL) sends may trigger turns.
 import { afterEach, expect, test } from "bun:test";
-import { activeHubs, api, readSseEvents, register, send, startHub, stopHub, TOKEN } from "./harness";
+import { api, readSseEvents, register, send, startHub, stopAllHubs, TOKEN } from "./harness";
 
 afterEach(async () => {
-	for (const h of [...activeHubs]) await stopHub(h);
+	await stopAllHubs();
 });
 
 async function openSse(hub: Awaited<ReturnType<typeof startHub>>, sseUrl: string): Promise<Response> {

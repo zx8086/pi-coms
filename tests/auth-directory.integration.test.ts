@@ -3,10 +3,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { activeHubs, api, readSseEvents, register, startHub, stopHub, TOKEN } from "./harness.ts";
+import { api, readSseEvents, register, startHub, stopAllHubs, TOKEN } from "./harness.ts";
 
+const tmpDirs: string[] = [];
 afterEach(async () => {
-	while (activeHubs.length) await stopHub(activeHubs[activeHubs.length - 1]);
+	await stopAllHubs();
+	while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true });
 });
 
 const SIMON_TOKEN = "token-simon-0000000000000000";
@@ -25,6 +27,7 @@ function writeDirectory(file: string): void {
 
 async function startDirectoryHub(refreshMs = 60_000) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "authdir-"));
+	tmpDirs.push(dir);
 	const file = path.join(dir, "tokens.json");
 	writeDirectory(file);
 	const hub = await startHub(undefined, {
@@ -93,9 +96,13 @@ describe("directory auth", () => {
 		const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
 		delete parsed.principals.simon;
 		fs.writeFileSync(file, JSON.stringify(parsed));
-		await Bun.sleep(900);
 
-		const after = await api(hub, "GET", "/v1/agents?project=default", undefined, SIMON_TOKEN);
+		// The hub re-reads the directory every 300 ms; poll instead of sleeping a fixed time.
+		let after = await api(hub, "GET", "/v1/agents?project=default", undefined, SIMON_TOKEN);
+		for (let i = 0; i < 30 && after.status !== 401; i++) {
+			await Bun.sleep(100);
+			after = await api(hub, "GET", "/v1/agents?project=default", undefined, SIMON_TOKEN);
+		}
 		expect(after.status).toBe(401);
 
 		// simon's registration is gone; jane still authenticates

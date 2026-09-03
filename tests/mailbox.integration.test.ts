@@ -2,10 +2,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { activeHubs, api, readSseEvents, register, send, startHub, stopHub, TOKEN } from "./harness.ts";
+import { api, readSseEvents, register, send, startHub, stopAllHubs, stopHub, TOKEN } from "./harness.ts";
 
 afterEach(async () => {
-	while (activeHubs.length) await stopHub(activeHubs[activeHubs.length - 1]);
+	await stopAllHubs();
 });
 
 describe("mailbox send", () => {

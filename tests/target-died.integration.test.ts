@@ -4,10 +4,10 @@
 // the hub fails each pending msg_id with error "target_died" so senders'
 // awaits resolve immediately instead of hanging until timeout.
 import { afterEach, expect, test } from "bun:test";
-import { activeHubs, api, readSseEvents, register, send, startHub, stopHub, TOKEN } from "./harness";
+import { api, readSseEvents, register, send, startHub, stopAllHubs, TOKEN } from "./harness";
 
 afterEach(async () => {
-	for (const h of [...activeHubs]) await stopHub(h);
+	await stopAllHubs();
 });
 
 async function openSse(hub: Awaited<ReturnType<typeof startHub>>, sseUrl: string): Promise<Response> {

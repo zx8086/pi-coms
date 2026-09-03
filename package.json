@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "description": "Peer-to-peer communication for Pi Coding Agent instances, with multi-account AWS deployment",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@aws-sdk/client-acm": "^3.1123.0",
     "@aws-sdk/client-cloudtrail": "^3.1123.0",
@@ -14,5 +18,9 @@
     "@aws-sdk/client-rds": "^3.1121.0",
     "@aws-sdk/client-sts": "^3.1123.0",
     "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
   }
 }

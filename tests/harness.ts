@@ -13,8 +13,13 @@ const SERVER = path.join(import.meta.dir, "..", "scripts", "coms-net-server.ts")
 export type Hub = { proc: Bun.Subprocess; url: string; home: string };
 export const activeHubs: Hub[] = [];
 
+// Restart tests stop a hub and start a new one on the same HOME, so temp
+// homes are removed by stopAllHubs() from each file's afterEach, not by stopHub.
+const hubHomes = new Set<string>();
+
 export async function startHub(home?: string, extraEnv: Record<string, string> = {}): Promise<Hub> {
 	const h = home ?? fs.mkdtempSync(path.join(os.tmpdir(), "hub-home-"));
+	hubHomes.add(h);
 	const proc = Bun.spawn(["bun", SERVER], {
 		env: {
 			...process.env,
@@ -34,6 +39,12 @@ export async function startHub(home?: string, extraEnv: Record<string, string> =
 		if (fs.existsSync(sj)) break;
 		await Bun.sleep(50);
 	}
+	if (!fs.existsSync(sj)) {
+		proc.kill("SIGTERM");
+		await proc.exited;
+		const stderr = await new Response(proc.stderr as ReadableStream).text();
+		throw new Error(`hub failed to start within 5s\n${stderr}`);
+	}
 	const url = JSON.parse(fs.readFileSync(sj, "utf-8")).local_url as string;
 	const hub = { proc, url, home: h };
 	activeHubs.push(hub);
@@ -45,6 +56,12 @@ export async function stopHub(hub: Hub): Promise<void> {
 	await hub.proc.exited;
 	const i = activeHubs.indexOf(hub);
 	if (i >= 0) activeHubs.splice(i, 1);
+}
+
+export async function stopAllHubs(): Promise<void> {
+	while (activeHubs.length) await stopHub(activeHubs[activeHubs.length - 1]);
+	for (const h of hubHomes) fs.rmSync(h, { recursive: true, force: true });
+	hubHomes.clear();
 }
 
 export async function api(
