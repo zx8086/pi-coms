@@ -28,7 +28,7 @@ Peer-to-peer messaging between Pi Coding Agent instances (`coms-net` over HTTP/S
 
 ## Deployment (`deploy/`)
 
-Star topology inside the corp AWS estate: the hub is a zero-permission relay on a private EC2 host in shared-services (`deploy/modules/hub/`, systemd unit `coms-hub`, pinned private IP); each AWS account is a spoke (`deploy/modules/agent/`, one root per account under `deploy/accounts/`) running one read-only Pi agent plus its monitor. Full runbook: `docs/deployment/deployment.md`; operational gotchas: `docs/deployment/operations-gotchas.md`.
+Star topology inside the corp AWS estate: the hub is a zero-permission relay on a private EC2 host in shared-services (`deploy/modules/hub/`, systemd unit `coms-hub`, pinned private IP, mailbox on a dedicated EBS volume that outlives the instance); each AWS account is a spoke (`deploy/modules/agent/`, one root per account under `deploy/accounts/`) running one read-only Pi agent plus its monitor. Full runbook: `docs/deployment/deployment.md`; operational gotchas: `docs/deployment/operations-gotchas.md`.
 
 - `deploy/bootstrap/agent-bootstrap.sh` -- the single bootstrap for every agent host. All install/launch logic lives here (installs `herdr.service`, `pi-agent.service`, `pi-monitor.service`); the userdata shim only sets env. Re-run idempotently on a live host via SSM: `bash /var/lib/cloud/instance/user-data.txt`.
 - Code reaches hosts from an S3 bundle, never from GitHub: `deploy/publish-fleet.sh` uploads `bundle.tar.gz` + `version`; a State Manager association runs `pi-coms-update` on every host (hub included) every 30 min. Publishing is a manual step today. The git-clone boot path in the bootstrap is legacy for hosts without `bundle_s3_uri`.

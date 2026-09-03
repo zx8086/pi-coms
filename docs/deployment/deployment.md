@@ -19,7 +19,7 @@ eu-oit-dev + monitor ────────────────┘        
 
 | Component | Where it runs | Source |
 |-----------|---------------|--------|
-| Hub | Private EC2 in shared-services, systemd unit `coms-hub` | `deploy/modules/hub/` |
+| Hub | Private EC2 in shared-services, systemd unit `coms-hub`; mailbox on a dedicated EBS volume that survives instance replacement | `deploy/modules/hub/` |
 | AWS agent (one per account) | EC2 via Terraform | `deploy/modules/agent/`, `deploy/accounts/<name>/` |
 | Account monitor (`pi-monitor.service`) | Same host as each agent | `scripts/coms-net-monitor.ts`, installed by the shared bootstrap |
 | Shared bootstrap | Every agent host | `deploy/bootstrap/agent-bootstrap.sh` |

@@ -13,9 +13,12 @@ remove an entry when the underlying behavior changes.
 - Per-host configuration that must not churn instances belongs in the
   bootstrap, not in terraform or userdata (`PI_MONITOR_REPORT_TO` is set
   by the bootstrap for this reason).
-- Replacing the hub instance loses its on-instance sqlite mailbox (queued
-  and historical inbox rows). The pinned private IP means spokes reconnect
-  unchanged.
+- The hub mailbox lives on a dedicated EBS volume (`<prefix>-hub-mailbox`,
+  `prevent_destroy`) mounted at `/home/comshub/.pi/coms-net`. Replacing the
+  hub instance keeps the inbox: the new host re-attaches and mounts the
+  volume at boot. Stop `coms-hub` on the old host before the apply so sqlite
+  is flushed. The volume is single-AZ with no snapshots; TTL (14 days) still
+  bounds retention.
 - The rendered agent userdata is hashed. Any byte change to
   `deploy/modules/agent/userdata.sh.tftpl`, a comment included, replaces
   every agent instance in every account. Behaviour changes go in the
