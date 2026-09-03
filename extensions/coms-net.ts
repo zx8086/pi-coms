@@ -1438,6 +1438,7 @@ export default function (pi: ExtensionAPI) {
 			"Read a durable inbox: long-TTL mailbox messages (e.g. monitor reports) are retained on the hub until their TTL expires and stay readable by everyone. " +
 			"Non-destructive and identical for every reader, so any operator connecting at any time sees the same messages on demand. " +
 			`Reads the shared duty inbox "${INBOX_NAME}" unless name says otherwise; every operator sees the same history. ` +
+			"An agent's inbox (name=<agent>) is its conversation history: every prompt it was asked, by whom, when, and its reply, kept 14 days. " +
 			"Use since with a msg_id to fetch only newer messages. " +
 			"Listing bodies are previews; pass msg_id to read one message in full (e.g. a monitor incident report whose findings run past the preview).",
 		parameters: Type.Object({
@@ -1470,6 +1471,8 @@ export default function (pi: ExtensionAPI) {
 					status: String(m.status ?? ""),
 					created_at: String(m.created_at ?? ""),
 					prompt: typeof m.prompt === "string" ? m.prompt : "",
+					response: m.response ?? null,
+					error: typeof m.error === "string" ? m.error : null,
 				})),
 				{ msgId },
 			);

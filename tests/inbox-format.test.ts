@@ -65,3 +65,12 @@ describe("formatInbox", () => {
 		expect(text).toMatch(/limit|since/);
 	});
 });
+
+test("a completed conversation shows its reply under the prompt; a failed one shows the error", () => {
+	const out = formatInbox("eu-oit-dev", [
+		{ msg_id: "m1", sender_name: "simon", status: "complete", created_at: "t1", prompt: "how many RDS?", response: "three" },
+		{ msg_id: "m2", sender_name: "simon", status: "error", created_at: "t2", prompt: "and now?", response: null, error: "expired" },
+	]);
+	expect(out).toContain("how many RDS?\n  reply: three");
+	expect(out).toContain("and now?\n  reply: (expired)");
+});

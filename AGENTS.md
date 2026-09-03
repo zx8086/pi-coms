@@ -79,7 +79,9 @@ operator role.
   when the operator asks, with `coms_net_inbox`. It reads the shared `ops`
   inbox by default; "my inbox", "the inbox", and "the ops inbox" all mean
   that one, never your own name (ULID msg_ids sort by time, `since`
-  continues from a known id).
+  continues from a known id). An agent's own inbox (`name=eu-oit-dev`) is
+  its conversation history: what it was asked, by whom, when, and its
+  reply, for 14 days. Use it for "what did we ask oit today".
 - Inbox listings show preview bodies. A message ending in `…` was cut:
   before summarizing it, re-read it in full with `coms_net_inbox` and its
   `msg_id`. Never report a finding count or family from a truncated body

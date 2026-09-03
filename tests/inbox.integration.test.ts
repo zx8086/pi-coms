@@ -59,7 +59,7 @@ describe("shared inbox", () => {
 		expect(msgs.map((m: any) => m.prompt)).toEqual(["durable report"]);
 	});
 
-	test("short-TTL messages are not part of the durable inbox", async () => {
+	test("a completed conversation becomes part of the target's inbox, an in-flight one does not (SIO-1620)", async () => {
 		const hub = await startHub();
 		await register(hub, "SENDER", "monitor");
 		const sseUrl = await register(hub, "TGT", "helper");
@@ -67,12 +67,59 @@ describe("shared inbox", () => {
 		await Bun.sleep(100);
 		await send(hub, "SENDER", "helper", "quick question"); // default TTL
 		const [prompt] = await readSseEvents(resp, "prompt", 1);
+
+		// delivered but unanswered: not history yet
+		let r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
+		expect(((await r.json()) as any).messages).toHaveLength(0);
+
 		await api(hub, "POST", `/v1/messages/${prompt.msg_id}/response`, {
 			project: "default", responder_session: "TGT", response: "answer", error: null,
 		});
 		await resp.body?.cancel();
-		const r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
-		expect(((await r.json()) as any).messages).toHaveLength(0);
+		r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
+		const msgs = ((await r.json()) as any).messages;
+		expect(msgs).toHaveLength(1);
+		expect(msgs[0]).toMatchObject({ prompt: "quick question", status: "complete", response: "answer", sender_name: "monitor" });
+		// the shared ops inbox is untouched by conversations with other names
+		const ops = await api(hub, "GET", "/v1/mailbox?project=default&name=ops&limit=10");
+		expect(((await ops.json()) as any).messages).toHaveLength(0);
+	});
+
+	test("a conversation leaves hub memory after the message TTL but stays on disk until the retention window (SIO-1620)", async () => {
+		const hub = await startHub(undefined, {
+			PI_COMS_NET_MESSAGE_TTL_MS: "200",
+			PI_COMS_NET_TTL_SCAN_MS: "200",
+			PI_COMS_NET_HISTORY_RETAIN_MS: "1500",
+		});
+		await register(hub, "SENDER", "monitor");
+		const sseUrl = await register(hub, "TGT", "helper");
+		const resp = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${TOKEN}` } });
+		await Bun.sleep(100);
+		await send(hub, "SENDER", "helper", "remember me");
+		const [prompt] = await readSseEvents(resp, "prompt", 1);
+		await api(hub, "POST", `/v1/messages/${prompt.msg_id}/response`, {
+			project: "default", responder_session: "TGT", response: "kept", error: null,
+		});
+		await resp.body?.cancel();
+
+		// past the message TTL: gone from the live message map, present in the inbox
+		let inMemory = 200;
+		for (let i = 0; i < 20 && inMemory !== 404; i++) {
+			await Bun.sleep(100);
+			inMemory = (await api(hub, "GET", `/v1/messages/${prompt.msg_id}`)).status;
+		}
+		expect(inMemory).toBe(404);
+		let r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
+		expect(((await r.json()) as any).messages.map((m: any) => m.response)).toEqual(["kept"]);
+
+		// past the retention window: purged
+		let left = 1;
+		for (let i = 0; i < 30 && left !== 0; i++) {
+			await Bun.sleep(100);
+			r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
+			left = ((await r.json()) as any).messages.length;
+		}
+		expect(left).toBe(0);
 	});
 
 	test("mailbox endpoint requires auth and a name", async () => {

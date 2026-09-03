@@ -81,6 +81,34 @@ describe("MailStore inbox", () => {
 		store.close();
 	});
 
+	test("completed conversations are listed for their target with the reply; in-flight ones are not (SIO-1620)", () => {
+		const store = new MailStore(tmpDb());
+		const done = new Date().toISOString();
+		store.upsert(msg({ target_name: "eu-oit-dev", mailbox: false, prompt: "how many RDS?", status: "complete", response: "three", completed_at: done }));
+		store.upsert(msg({ target_name: "eu-oit-dev", mailbox: false, prompt: "still thinking", status: "delivered" }));
+		store.upsert(msg({ target_name: "eu-oit-dev", mailbox: false, prompt: "never answered", status: "error", error: "expired", completed_at: done }));
+		const rows = store.inbox("eu-oit-dev", 10);
+		expect(rows.map((r) => [r.prompt, r.status, r.response, r.error])).toEqual([
+			["how many RDS?", "complete", "three", null],
+			["never answered", "error", null, "expired"],
+		]);
+		expect(store.inbox("ops", 10)).toHaveLength(0);
+		store.close();
+	});
+
+	test("purgeExpired removes conversations older than the retention window, measured from completion (SIO-1620)", () => {
+		const store = new MailStore(tmpDb());
+		const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+		const recent = new Date(Date.now() - 86_400_000).toISOString();
+		// interactive rows expire (expires_at) 30 min after creation; retention must not look at that
+		const expired = new Date(Date.now() - 3_600_000).toISOString();
+		store.upsert(msg({ target_name: "agent", mailbox: false, prompt: "old", status: "complete", completed_at: old, expires_at: expired }));
+		store.upsert(msg({ target_name: "agent", mailbox: false, prompt: "recent", status: "complete", completed_at: recent, expires_at: expired }));
+		store.purgeExpired(14 * 86_400_000);
+		expect(store.inbox("agent", 10).map((r) => r.prompt)).toEqual(["recent"]);
+		store.close();
+	});
+
 	test("purgeExpired leaves non-terminal rows to the live sweep", () => {
 		const store = new MailStore(tmpDb());
 		store.upsert(msg({
