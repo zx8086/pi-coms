@@ -41,17 +41,20 @@ token-list profile="":
     ./deploy/token-admin.sh list "{{profile}}"
 
 # Resolves the instance by its Name tag at connect time: instance ids change on
-# replacement, the tag does not.
+# replacement, the tag does not. local_port must match the port in
+# PI_COMS_NET_SERVER_URL (http://127.0.0.1:<local_port>), e.g.
+# just hub-tunnel local_port=8788
 
-# SSM port-forward to the corp hub on localhost:<port>
-hub-tunnel profile="eu-shared-services-dev" region="eu-central-1" port="8787":
+# SSM port-forward to the corp hub: hub port <port> on localhost:<local_port> (default: same)
+hub-tunnel profile="eu-shared-services-dev" region="eu-central-1" port="8787" local_port="":
     #!/usr/bin/env bash
     set -euo pipefail
+    LOCAL="{{local_port}}"; LOCAL="${LOCAL:-{{port}}}"
     HUB_ID=$(aws ec2 describe-instances --profile {{profile}} --region {{region}} \
       --filters "Name=tag:Name,Values=pi-coms-hub-hub" "Name=instance-state-name,Values=running" \
       --query "Reservations[].Instances[].InstanceId" --output text)
     if [ -z "$HUB_ID" ] || [ "$HUB_ID" = "None" ]; then echo "no running hub instance found" >&2; exit 1; fi
-    echo "hub instance: $HUB_ID -> localhost:{{port}}"
+    echo "hub instance: $HUB_ID port {{port}} -> localhost:$LOCAL (PI_COMS_NET_SERVER_URL must be http://127.0.0.1:$LOCAL)"
     exec aws ssm start-session --profile {{profile}} --region {{region}} --target "$HUB_ID" \
       --document-name AWS-StartPortForwardingSession \
-      --parameters '{"portNumber":["{{port}}"],"localPortNumber":["{{port}}"]}'
+      --parameters "{\"portNumber\":[\"{{port}}\"],\"localPortNumber\":[\"$LOCAL\"]}"
