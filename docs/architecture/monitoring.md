@@ -86,7 +86,7 @@ Every cycle starts with a T0 gate: `sts:GetCallerIdentity` compared against `AWS
 | Cost | daily | Yesterday vs the trailing 14-day baseline; alerts only when over by **both** +20% and +$1 | Once per date |
 | Ingestion | hourly | Metrics Insights `IncomingLogEvents` per log group; warn when the last full hour is 0 against a same-hour-of-day 7-day median >= 10 (so the nightly scale-to-zero is silent by construction); recovery info. The inverse of the log-errors check: it finds logging that **stopped** | Per group, alert once until recovery |
 | Trail | daily | `GetTrailStatus` per trail: `IsLogging=false` critical, delivery error warn, zero trails info; recovery info. Shadow org trails that deny status reads are tolerated | Per trail + condition, 24 h re-alert |
-| Certs | daily | ACM `NotAfter`: < 30 d warn, < 7 d critical (managed renewal happens ~60 d out, so < 30 d means renewal is failing). A cert whose domain is covered by another valid cert (exact or single-label wildcard, DomainName or SANs) reports `info` as superseded -- a rotated-out cert is cleanup noise, not risk | Per cert + severity, 7 d re-alert |
+| Certs | daily | ACM `NotAfter` across the host region and `us-east-1` (CloudFront certs live there; list configurable): < 30 d warn, < 7 d critical (managed renewal happens ~60 d out, so < 30 d means renewal is failing). A cert whose domain is covered by another valid cert in the same region (exact or single-label wildcard, DomainName or SANs) reports `info` as superseded -- a rotated-out cert is cleanup noise, not risk. An unreadable region is one info scoping finding; the other regions still scan | Per cert + severity, 7 d re-alert |
 | Watchlist | daily | `cloudtrail:LookupEvents` for scary write events (StopLogging, SG ingress/egress and revocations, route changes, S3 exposure, IAM edits, ...); one call per event name, watermarked. `ModifyDBInstance` is deliberately absent: resource drift catches RDS changes within 15 minutes while this list runs daily. The monitor is read-only, so its own CloudTrail echo can never match | Per event id |
 
 Watermarks, fingerprints, and snapshots all persist in `state.db`, so a monitor restart produces neither duplicate nor missed alerts.
@@ -143,6 +143,7 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | `PI_MONITOR_CHECK_CRON` | `*/15 * * * *` | Alarm/log/drift cadence |
 | `PI_MONITOR_HOURLY_CRON` | `7 * * * *` | Ingestion heartbeat (minute 7: never a */15 boundary) |
 | `PI_MONITOR_DAILY_CRON` | `@daily` | Cost/trail/certs/watchlist + digest (midnight UTC) |
+| `PI_MONITOR_CERT_REGIONS` | host region + `us-east-1` | Comma-separated ACM regions the cert check scans |
 | `PI_MONITOR_REVIEW_CRON` | `@weekly` | Suppression review mail (monthly: `0 0 1 * *` + window 31) |
 | `PI_MONITOR_REVIEW_WINDOW_DAYS` | `7` | Match window the review counts over |
 | `PI_MONITOR_INVESTIGATE_TARGET` | `aws-<account_id>` | Peer that investigates findings |

@@ -17,7 +17,7 @@ import { STSClient } from "@aws-sdk/client-sts";
 import * as os from "node:os";
 import * as path from "node:path";
 import { checkAlarms } from "./monitor/checks/alarms.ts";
-import { checkCerts } from "./monitor/checks/certs.ts";
+import { certRegions, checkCerts } from "./monitor/checks/certs.ts";
 import { checkCost } from "./monitor/checks/cost.ts";
 import { checkDrift } from "./monitor/checks/drift.ts";
 import { checkIdentity, type GateResult } from "./monitor/checks/identity.ts";
@@ -229,7 +229,10 @@ function main(): void {
 	const ce = new CostExplorerClient({ region: "us-east-1" }); // Cost Explorer is us-east-1 only
 	const sts = new STSClient({ region });
 	const cloudtrail = new CloudTrailClient({ region });
-	const acm = new ACMClient({ region });
+	const acmClients = certRegions(region, process.env.PI_MONITOR_CERT_REGIONS).map((r) => ({
+		region: r,
+		client: new ACMClient({ region: r }),
+	}));
 	const rds = new RDSClient({ region });
 	const lambda = new LambdaClient({ region });
 	const log = (line: string) => console.log(`${new Date().toISOString()} ${line}`);
@@ -398,7 +401,7 @@ function main(): void {
 			checks: [
 				{ name: "cost", run: () => checkCost(ce, state, { pct: COST_PCT, abs: COST_ABS }) },
 				{ name: "trail", run: () => checkTrail(cloudtrail, state) },
-				{ name: "certs", run: () => checkCerts(acm, state, { warnDays: CERT_WARN_DAYS, critDays: CERT_CRIT_DAYS }) },
+				{ name: "certs", run: () => checkCerts(acmClients, state, { warnDays: CERT_WARN_DAYS, critDays: CERT_CRIT_DAYS }) },
 				{
 					name: "watchlist",
 					run: () => checkWatchlist(cloudtrail, state, WATCHLIST.length > 0 ? { events: WATCHLIST } : {}),
