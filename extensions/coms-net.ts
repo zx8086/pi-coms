@@ -1,30 +1,16 @@
-/**
- * coms-net — HTTP/SSE Pi Agent Communication Network (client)
- *
- * Drop-in successor to `extensions/coms.ts` whose substrate is a dedicated
- * Bun HTTP/SSE hub instead of per-agent Unix sockets / named pipes. The
- * user-facing tool surface is renamed for total separation from v1:
- *
- *   tools         coms_net_list / coms_net_send / coms_net_get / coms_net_await
- *   slash command /coms-net
- *   widget key    "coms-net-pool"   (placement: belowEditor only)
- *   audit channel "coms-net-log"
- *   customType    "coms-net-inbound"
- *   status key    "coms-net"
- *   registry root ~/.pi/coms-net/
- *
- * Both `coms.ts` and `coms-net.ts` may be loaded together without identifier
- * collision. v1 stays untouched.
- *
- * Usage:
- *   bun scripts/coms-net-server.ts                                 # start hub
- *   pi -e extensions/coms-net.ts                                   # auto-discover local server.json
- *   pi -e extensions/coms-net.ts --server-url http://host:port \
- *      --auth-token <tok> --cname planner --project default
- *
- * Note: the agent name flag is `--cname` (not `--name`). pi's own harness owns
- * `--name` and resumes it across sessions, so coms-net uses a distinct flag.
- */
+// extensions/coms-net.ts
+//
+// Networked Pi agent messaging over a Bun HTTP/SSE hub (scripts/coms-net-server.ts).
+// Tools coms_net_list/send/get/await/broadcast/inbox, slash command /coms-net,
+// widget "coms-net-pool", audit channel "coms-net-log", registry ~/.pi/coms-net/.
+//
+// The agent name flag is --cname, not --name: Pi's own harness owns --name and
+// resumes it across sessions.
+//
+// Usage:
+//   bun scripts/coms-net-server.ts                     # start hub
+//   pi -e extensions/coms-net.ts                       # auto-discover local server.json
+//   pi -e extensions/coms-net.ts --server-url http://host:port --auth-token <tok> --cname planner
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
@@ -852,7 +838,7 @@ export default function (pi: ExtensionAPI) {
 		if (base >= RECONNECT_MAX_MS && !notifiedReconnectCap) {
 			notifiedReconnectCap = true;
 			if (currentCtx?.hasUI) {
-				try { currentCtx.ui.notify("📡 coms-net: reconnect backoff at ceiling", "warning"); } catch { /* ignore */ }
+				try { currentCtx.ui.notify("coms-net: reconnect backoff at ceiling", "warning"); } catch { /* ignore */ }
 			}
 		}
 		reconnectTimer = setTimeout(async () => {
@@ -976,7 +962,7 @@ export default function (pi: ExtensionAPI) {
 		serverUrl = resolveServerUrl(project, flags.serverUrl);
 		if (!serverUrl) {
 			ctx.ui?.notify?.(
-				`📡 coms-net: no server URL for project "${project}". Start one with: bun scripts/coms-net-server.ts`,
+				`coms-net: no server URL for project "${project}". Start one with: bun scripts/coms-net-server.ts`,
 				"error",
 			);
 			audit("boot_failed", { reason: "no_server_url", project });
@@ -987,7 +973,7 @@ export default function (pi: ExtensionAPI) {
 		authToken = resolveAuthToken(project, flags.authToken);
 		if (!authToken) {
 			ctx.ui?.notify?.(
-				`📡 coms-net: no auth token for project "${project}". Set PI_COMS_NET_AUTH_TOKEN or pass --auth-token. ` +
+				`coms-net: no auth token for project "${project}". Set PI_COMS_NET_AUTH_TOKEN or pass --auth-token. ` +
 				`If running a local server, ensure ~/.pi/coms-net/projects/${project}/server.secret.json exists with mode 0600.`,
 				"error",
 			);
@@ -1000,7 +986,7 @@ export default function (pi: ExtensionAPI) {
 			await httpFetch("GET", "/health");
 		} catch (err) {
 			ctx.ui?.notify?.(
-				`📡 coms-net: server unreachable at ${serverUrl} — ${safeError(err)}. ` +
+				`coms-net: server unreachable at ${serverUrl} — ${safeError(err)}. ` +
 				`Start one with: bun scripts/coms-net-server.ts`,
 				"error",
 			);
@@ -1014,7 +1000,7 @@ export default function (pi: ExtensionAPI) {
 			reg = await registerAgent();
 		} catch (err) {
 			ctx.ui?.notify?.(
-				`📡 coms-net: register failed — ${safeError(err)}`,
+				`coms-net: register failed — ${safeError(err)}`,
 				"error",
 			);
 			audit("boot_failed", { reason: "register_failed", error: safeError(err) });
@@ -1052,7 +1038,7 @@ export default function (pi: ExtensionAPI) {
 		// 7. Install widget + status. Success is the default — only failures notify
 		// (status line + widget already convey the connected state).
 		try {
-			ctx.ui.setStatus("coms-net", `📡 ${identity.name}@${identity.project}`);
+			ctx.ui.setStatus("coms-net", `coms-net ${identity.name}@${identity.project}`);
 			installPoolWidget(ctx);
 		} catch {
 			// hasUI may be false in some contexts.
@@ -1243,7 +1229,7 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, options, theme) {
 			const details = result.details as any;
 			const agents: any[] = details?.agents ?? [];
-			const header = theme.fg("accent", `📡 ${agents.length} peer(s)`);
+			const header = theme.fg("accent", `${agents.length} peer(s)`);
 			if (!options.expanded || agents.length === 0) {
 				return new Text(header, 0, 0);
 			}
@@ -1265,7 +1251,7 @@ export default function (pi: ExtensionAPI) {
 			"INITIATE a new outbound message to a peer agent on the coms-net hub. " +
 			"Returns synchronously with a msg_id once the server queues the prompt. " +
 			"Use coms_net_get (non-blocking) or coms_net_await (blocking) with that msg_id to retrieve the peer's reply.\n\n" +
-			"⚠️  DO NOT call this tool to REPLY to an inbound message. " +
+			"WARNING: DO NOT call this tool to REPLY to an inbound message. " +
 			"When you receive a `[from <peer>] …` follow-up, just write your answer as your normal assistant message — " +
 			"the coms-net extension automatically captures the final assistant text at the end of your turn and " +
 			"submits it back to the original caller. Calling coms_net_send in response creates an infinite ping-pong loop.\n\n" +
@@ -1275,7 +1261,6 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			target: Type.String({ description: "Peer name (preferred, scoped to your project) or session_id." }),
 			prompt: Type.String({ description: "The prompt to send." }),
-			conversation_id: Type.Optional(Type.String()),
 			response_schema: Type.Optional(Type.Any({ description: "Optional JSON Schema describing the expected response shape." })),
 			ttl_ms: Type.Optional(Type.Number({ description: "Optional TTL in ms. Beyond the server default (30 min) the message is queued durably for an offline peer name and delivered when it next registers. Capped by the server (default 14 days)." })),
 		}),
@@ -1293,7 +1278,7 @@ export default function (pi: ExtensionAPI) {
 				target: params.target,
 				target_session: null,
 				prompt: params.prompt,
-				conversation_id: (params as any).conversation_id ?? null,
+				conversation_id: null,
 				response_schema: ((params as any).response_schema as object | undefined) ?? null,
 				hops,
 				ttl_ms: typeof (params as any).ttl_ms === "number" && (params as any).ttl_ms > 0 ? (params as any).ttl_ms : null,
@@ -1512,7 +1497,7 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Block until the reply to YOUR OWN outbound coms_net_send arrives, or the timeout fires (default 30 min). " +
 			"Only call this with a msg_id that YOU received as the return value of a coms_net_send call you just made.\n\n" +
-			"⚠️  Do NOT call this with a msg_id that came in via an inbound `[from <peer>] …` prompt — those msg_ids belong to the *peer's* outbound, not yours. " +
+			"WARNING: Do NOT call this with a msg_id that came in via an inbound `[from <peer>] …` prompt — those msg_ids belong to the *peer's* outbound, not yours. " +
 			"To reply to an inbound message, do nothing special: just answer normally as your assistant message, " +
 			"and the extension will auto-submit your final text back to the caller when your turn ends.\n\n" +
 			"The reply only arrives when the target's whole turn ends. A prompt that makes the target investigate " +

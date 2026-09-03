@@ -51,9 +51,7 @@ Project-specific documentation for pi-coms: peer-to-peer messaging between Pi Co
 
 - [`README.md`](../README.md) -- prerequisites, setup, quick starts
 - [`CLAUDE.md`](../CLAUDE.md) -- assistant working notes for this repository
-- [`deploy/README.md`](../deploy/README.md) -- operator runbook for the star topology
 - [`AGENTS.md`](../AGENTS.md) -- operator-console instructions; [`deploy/AGENTS-spoke.md`](../deploy/AGENTS-spoke.md) -- the spoke agents' investigation discipline
-- [`deploy/hostinger/README.md`](../deploy/hostinger/README.md) -- the deprecated VPS estate (do not deploy)
 - [`guides/documentation-guide.md`](../guides/documentation-guide.md) -- the standards these docs follow
 
 ## Service Overview

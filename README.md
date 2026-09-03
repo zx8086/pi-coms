@@ -28,16 +28,6 @@ cp .env.sample .env   # fill in provider API keys
 
 Pi does not auto-load `.env`. The `just` recipes load it via `set dotenv-load`; running `pi` directly requires `source .env` first.
 
-## Two transports
-
-| | `coms` (local) | `coms-net` (networked) |
-| --- | --- | --- |
-| Transport | Unix sockets / named pipes | HTTP + Server-Sent Events |
-| Scope | One machine | Same machine, LAN, or remote URL |
-| Server | None -- agents listen directly | `bun scripts/coms-net-server.ts` |
-| Tools | `coms_list/send/get/await` | `coms_net_list/send/get/await/broadcast` |
-| Auth | OS file perms | `PI_COMS_NET_AUTH_TOKEN` bearer token |
-
 ## Tool surface
 
 | Tool | What it does |
@@ -49,16 +39,6 @@ Pi does not auto-load `.env`. The `just` recipes load it via `set dotenv-load`; 
 | `coms_net_broadcast` | One prompt to all (or selected) peers; replies gathered in parallel |
 
 Replies travel back automatically: when an inbound prompt triggers a turn, the receiver's final assistant message is packaged as the response.
-
-## Quick start -- same machine
-
-```bash
-# Terminal 1
-just local-coms --name planner --purpose "Plans the work"
-
-# Terminal 2
-just local-coms --name coder --purpose "Writes the code"
-```
 
 ## Quick start -- networked
 

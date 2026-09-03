@@ -3,7 +3,7 @@
 // The coms-net hub as a private AWS service: one small EC2 host running
 // scripts/coms-net-server.ts under systemd, reachable only from the CIDRs
 // you allow (over VPC peering / Transit Gateway). This is the in-VPC
-// alternative to the VPS deployment (deploy/hostinger/) -- no public
+// alternative to the retired VPS deployment -- no public
 // exposure, no TLS proxy; the bearer token and network placement are the
 // perimeter. The hub holds no cloud permissions beyond reading its own
 // token secret; the mailbox persists on the root EBS volume.

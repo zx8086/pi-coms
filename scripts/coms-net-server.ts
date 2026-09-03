@@ -1500,7 +1500,7 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 				const set = proj.awaiters.get(id) ?? new Set<Awaiter>();
 				proj.awaiters.set(id, set);
 
-				const finalize = (payload: any, status = 200) => {
+				const finalize = (payload: any) => {
 					if (done) return;
 					done = true;
 					try {
@@ -1509,7 +1509,6 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 					} catch {
 						// already closed
 					}
-					void status;
 				};
 
 				const awaiter: Awaiter = {

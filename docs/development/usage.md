@@ -6,8 +6,7 @@ Day-to-day operation: starting peers, connecting to the deployed hub, addressing
 
 | Need to... | Run |
 |------------|-----|
-| Two local peers, one machine | `just local-coms --name a` / `just local-coms --name b` |
-| Local hub plus networked peers | `just coms-net-server`, then `just coms --name dev --cname dev` |
+| Two peers on one machine | `just coms-net-server`, then `just coms --name a --cname a` and `just coms --name b --cname b` |
 | Connect to the corp hub | SSM tunnel + token (see below) |
 | List every just recipe | `just` |
 
@@ -92,13 +91,12 @@ Delivered reports stay readable: "show my inbox" or "show the ops inbox" calls `
 | `/coms-net --project <name>` | Point the widget at another project |
 | `/coms-net --reconnect` | Force SSE reconnect and re-register |
 | `/coms-net --server` | Print hub URL, version, and `server_id` |
-| `/coms --all`, `/coms --project <name>` | Local-transport equivalents (`*` scans all projects) |
 
 The widget below the editor shows each peer's name, model, live context usage bar, and purpose. A dim row is a stale peer; a crossed-out row is offline.
 
 ## Identity flags
 
-Both extensions accept the same identity flags (`extensions/coms-net.ts:375-409`):
+Identity flags:
 
 | Flag | Purpose |
 |------|---------|
@@ -107,7 +105,7 @@ Both extensions accept the same identity flags (`extensions/coms-net.ts:375-409`
 | `--project <name>` | Namespace; default `default`. Peers only see their own project |
 | `--color <#RRGGBB>` | Widget color |
 | `--explicit` | Hidden from lists and broadcasts unless explicitly requested |
-| `--server-url`, `--auth-token` | coms-net only; override env and local discovery |
+| `--server-url`, `--auth-token` | Override env and local discovery |
 
 Identity can also come from `--system-prompt`/`--append-system-prompt` markdown frontmatter (`name`, `description`, `color`); CLI flags win.
 
@@ -117,16 +115,15 @@ Always qualify models as `provider/id` -- `--model` matches a pattern, and a bar
 
 ## Environment variables
 
-Client-side knobs (defaults in `extensions/coms-net.ts:42-52` and `extensions/coms.ts:30-35`):
+Client-side knobs (defaults near the top of `extensions/coms-net.ts`):
 
 | Variable | Default | Controls |
 |----------|---------|----------|
 | `PI_COMS_NET_SERVER_URL` | unset | Hub URL (else local `server.json` discovery) |
 | `PI_COMS_NET_AUTH_TOKEN` | unset | Bearer token (else local `server.secret.json`) |
 | `PI_COMS_NET_PROJECT` | unset | Project fallback when `--project` is not given |
-| `PI_COMS_NET_MAX_HOPS` / `PI_COMS_MAX_HOPS` | `5` | Forwarding-chain ceiling |
-| `PI_COMS_NET_MESSAGE_TTL_MS` / `PI_COMS_TIMEOUT_MS` | `1800000` | Await default and message expiry (30 min) |
-| `PI_COMS_DIR` | `~/.pi/coms` | Local-transport registry root (coms-net's root is fixed) |
+| `PI_COMS_NET_MAX_HOPS` | `5` | Forwarding-chain ceiling |
+| `PI_COMS_NET_MESSAGE_TTL_MS` | `1800000` | Await default and message expiry (30 min) |
 
 Hub-side variables are covered in [Networking](../architecture/networking.md#hub-listeners-and-ports); the mailbox cap `PI_COMS_NET_MAX_TTL_MS` and every `PI_MONITOR_*` knob are tabulated in [Monitoring](../architecture/monitoring.md#configuration).
 

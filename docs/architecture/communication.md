@@ -30,9 +30,9 @@ States: `queued`, `delivered`, `complete`, `error`, `timeout` (`scripts/coms-net
 ```
 
 1. **Send.** `coms_net_send` posts to `/v1/messages`. The hub resolves the target, checks the hop count and the target's inbox depth (cap 100), assigns a ULID `msg_id`, and pushes a `prompt` event down the target's SSE stream. The sender gets the `msg_id` back immediately.
-2. **Deliver.** The receiving extension injects the prompt into its session as a follow-up message that triggers a normal Pi turn (`extensions/coms-net.ts:657-714`). The injected text names the sender and its working directory.
-3. **Reply.** On `agent_end`, the extension takes the final assistant message of that turn and submits it via `POST /v1/messages/:id/response` (`extensions/coms-net.ts:1650-1707`). The hub pushes a `response` event to the sender and releases any awaiters.
-4. **Collect.** The sender's `coms_net_await` races three sources: the local SSE-resolved promise, a server long-poll on `/v1/messages/:id/await`, and a local timer (`extensions/coms-net.ts:1437`).
+2. **Deliver.** The receiving extension injects the prompt into its session as a follow-up message that triggers a normal Pi turn (`extensions/coms-net.ts:657-746`). The injected text names the sender and its working directory.
+3. **Reply.** On `agent_end`, the extension takes the final assistant message of that turn and submits it via `POST /v1/messages/:id/response` (`extensions/coms-net.ts:1774-1828`). The hub pushes a `response` event to the sender and releases any awaiters.
+4. **Collect.** The sender's `coms_net_await` races three sources: the local SSE-resolved promise, a server long-poll on `/v1/messages/:id/await`, and a local timer (`extensions/coms-net.ts:1564`).
 
 Messages expire 30 minutes after creation by default (`PI_COMS_NET_MESSAGE_TTL_MS`); expired queued or delivered messages become `error: "expired"`. A send may request a longer `ttl_ms`, capped by `PI_COMS_NET_MAX_TTL_MS` (default 14 days).
 
@@ -50,11 +50,9 @@ When an agent leaves the hub for any reason (clean shutdown, stale eviction, tok
 
 The receiver must not call `coms_net_send` to answer an inbound prompt; its turn output is the answer. This rule is enforced three ways:
 
-1. The injected inbound message carries an explicit guard: "reply by writing a normal assistant message ... DO NOT call coms_net_send/coms_net_await/coms_net_get to reply; that creates a ping-pong loop" (`extensions/coms-net.ts:685-688`).
+1. The injected inbound message carries an explicit guard: "reply by writing a normal assistant message ... DO NOT call coms_net_send/coms_net_await/coms_net_get to reply; that creates a ping-pong loop" (`extensions/coms-net.ts:722`).
 2. Every send-family tool description repeats the warning.
 3. The hop limit (below) backstops both.
-
-The local `coms` transport relies on the hop counter alone; its inbound injection carries no guard text.
 
 ### Structured replies
 
@@ -62,7 +60,7 @@ The local `coms` transport relies on the hop counter alone; its inbound injectio
 
 ## Broadcast
 
-`coms_net_broadcast` (`extensions/coms-net.ts:1505-1646`):
+`coms_net_broadcast` (`extensions/coms-net.ts:1633-1693`):
 
 1. Resolves targets: the explicit `targets` list, or every peer in the project that is not `offline` (stale peers are included).
 2. Fans out one independent `/v1/messages` send per target in parallel. A per-target send failure becomes that target's result; it never fails the whole broadcast.
@@ -73,13 +71,13 @@ The local `coms` transport relies on the hop counter alone; its inbound injectio
 
 | Rail | Mechanism | Default |
 |------|-----------|---------|
-| Hop limit | `hops` increments when a send happens inside an inbound-triggered turn; sends at the ceiling are rejected by client and hub | 5 (`PI_COMS_NET_MAX_HOPS` / `PI_COMS_MAX_HOPS`) |
+| Hop limit | `hops` increments when a send happens inside an inbound-triggered turn; sends at the ceiling are rejected by client and hub | 5 (`PI_COMS_NET_MAX_HOPS`) |
 | Ping-pong guard | Injected guard text plus tool-description warnings (coms-net) | -- |
 | Inbox cap | Hub rejects sends when the target has 100 undelivered or unanswered messages | `PI_COMS_NET_MAX_INBOX` |
 | Message TTL | Undelivered or unanswered messages expire | 30 min (`PI_COMS_NET_MESSAGE_TTL_MS`); per-send `ttl_ms` capped at 14 d (`PI_COMS_NET_MAX_TTL_MS`) |
 | Audit log | Every send/receive/response logged with `msg_id`, names, hops -- never prompt or response bodies | -- |
 
-A fresh user-initiated send starts at `hops = 0`. A send made while answering an inbound message inherits `inbound.hops + 1` (`extensions/coms-net.ts:1208-1211`), so a forwarding chain dies after five hosts no matter what the models decide to do.
+A fresh user-initiated send starts at `hops = 0`. A send made while answering inbound messages uses one past the deepest unfulfilled inbound of the turn (`extensions/coms-net.ts:1270`, `outboundHops` in `extensions/turnReply.ts`), so a forwarding chain dies after five hosts no matter what the models decide to do.
 
 ## Audit logs
 
