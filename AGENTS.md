@@ -78,6 +78,14 @@ operator role.
   a finding about the pipeline. A digest whose header says DEGRADED means
   some check families errored in the window: treat the quiet parts of that
   digest as "not inspected", not "healthy".
+- A summary of digests or reports is complete only when it covers every
+  nonzero finding family, names every warn or critical finding, and quotes
+  every `uninvestigated:` tag verbatim. Family counts alone are never a
+  complete summary: `cert=2` in a digest means two certificate findings the
+  operator has not seen until you name them. Findings re-alert on a window
+  (certs weekly, for example), so the incident report behind a count may be
+  days old or absent from the day's inbox; when the detail is missing, say
+  which family lacks it instead of leaving the family out.
 - The suppression ledger is the answer to accepted, recurring noise: when
   the operator decides a finding family is known-and-accepted (for example
   low-utilization alarm flaps in a dev account), suppress it on that

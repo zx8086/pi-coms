@@ -2,9 +2,11 @@
 import { describe, expect, test } from "bun:test";
 import {
 	DiagnosisSchema,
+	type DigestNotable,
 	FindingSchema,
 	formatDigest,
 	formatIncidentReport,
+	notablesFromJournal,
 	parseDiagnoses,
 } from "../scripts/monitor/report.ts";
 
@@ -138,4 +140,115 @@ test("uninvestigated marker carries the concrete failure reason when known", () 
 		"agent reply error: response not valid JSON",
 	);
 	expect(text).toContain("uninvestigated: agent reply error: response not valid JSON");
+});
+
+const quietDigest = {
+	accountId: "111122223333",
+	since: "2026-09-02T00:00:00Z",
+	findingCounts: {},
+	checkErrors: 0,
+	activeAlarms: [],
+	yesterdayUsd: null,
+	baselineUsd: null,
+};
+
+const notable = (over: Partial<DigestNotable> = {}): DigestNotable => ({
+	severity: "warn" as const,
+	family: "drift" as const,
+	resource: "i-059a799316e6d8f5d",
+	summary: "instance changed state running -> terminated",
+	uninvestigated: false,
+	...over,
+});
+
+describe("digest notables", () => {
+	test("names each warn+ finding with severity and family", () => {
+		const text = formatDigest({
+			...quietDigest,
+			findingCounts: { cert: 1, drift: 1 },
+			notables: [
+				notable({ severity: "critical", family: "cert", resource: "prana-dev.pvhcorp.com", summary: "Certificate prana-dev.pvhcorp.com expires in -979 day(s)" }),
+				notable(),
+			],
+		});
+		expect(text).toContain("(critical/cert) prana-dev.pvhcorp.com: Certificate prana-dev.pvhcorp.com expires in -979 day(s)");
+		expect(text).toContain("(warn/drift) i-059a799316e6d8f5d: instance changed state running -> terminated");
+	});
+
+	test("sorts critical before warn regardless of input order", () => {
+		const text = formatDigest({
+			...quietDigest,
+			findingCounts: { cert: 1, drift: 1 },
+			notables: [
+				notable({ resource: "warn-first" }),
+				notable({ severity: "critical", family: "cert", resource: "crit-second" }),
+			],
+		});
+		expect(text.indexOf("crit-second")).toBeLessThan(text.indexOf("warn-first"));
+	});
+
+	test("marks uninvestigated findings on the line and totals them", () => {
+		const text = formatDigest({
+			...quietDigest,
+			findingCounts: { drift: 2 },
+			notables: [notable({ uninvestigated: true }), notable({ resource: "i-other" })],
+		});
+		const line = text.split("\n").find((l) => l.includes("i-059a799316e6d8f5d"));
+		expect(line).toContain("[uninvestigated]");
+		expect(text).toContain("uninvestigated: 1");
+		expect(text.split("\n").find((l) => l.includes("i-other"))).not.toContain("[uninvestigated]");
+	});
+
+	test("caps the list at 10 and counts the overflow", () => {
+		const notables = Array.from({ length: 13 }, (_, i) => notable({ resource: `i-${i}` }));
+		const text = formatDigest({ ...quietDigest, findingCounts: { drift: 13 }, notables });
+		expect(text).toContain("i-9");
+		expect(text).not.toContain("i-10:");
+		expect(text).toContain("+3 more warn+ finding(s)");
+	});
+
+	test("uninvestigated total counts findings beyond the display cap", () => {
+		const notables = Array.from({ length: 12 }, (_, i) =>
+			notable({ resource: `i-${i}`, uninvestigated: i === 11 }),
+		);
+		const text = formatDigest({ ...quietDigest, findingCounts: { drift: 12 }, notables });
+		expect(text).toContain("uninvestigated: 1");
+	});
+
+	test("quiet day digest is unchanged: no notable or uninvestigated lines", () => {
+		const text = formatDigest({ ...quietDigest, notables: [] });
+		expect(text).not.toContain("notable");
+		expect(text).not.toContain("uninvestigated");
+		expect(text).toBe(formatDigest(quietDigest));
+	});
+
+	test("info findings are never listed even if passed", () => {
+		const text = formatDigest({
+			...quietDigest,
+			findingCounts: { drift: 2 },
+			notables: [notable({ severity: "info" as never, resource: "i-info" }), notable()],
+		});
+		expect(text).not.toContain("i-info");
+	});
+});
+
+describe("notablesFromJournal", () => {
+	const row = (payload: unknown) => ({ payload: JSON.stringify(payload) });
+
+	test("keeps warn+ rows, drops info, and maps null diagnosis to uninvestigated", () => {
+		const rows = [
+			row({ ...finding, diagnosis: null }),
+			row({ ...finding, severity: "warn", resource: "warned", diagnosis: { probable_cause: "x", affected_resources: [], suggested_action: "y" } }),
+			row({ ...finding, severity: "info", resource: "noise", diagnosis: null }),
+		];
+		const notables = notablesFromJournal(rows);
+		expect(notables).toHaveLength(2);
+		expect(notables[0]).toMatchObject({ severity: "critical", resource: "cpu-high", uninvestigated: true });
+		expect(notables[1]).toMatchObject({ severity: "warn", resource: "warned", uninvestigated: false });
+	});
+
+	test("skips unparseable rows instead of throwing", () => {
+		const notables = notablesFromJournal([{ payload: "not json" }, row({ ...finding, diagnosis: null })]);
+		expect(notables).toHaveLength(1);
+	});
 });
