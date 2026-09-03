@@ -40,6 +40,9 @@ const MAX_HOPS = Number(process.env.PI_COMS_NET_MAX_HOPS ?? 5);
 const MESSAGE_TTL_MS = Number(process.env.PI_COMS_NET_MESSAGE_TTL_MS ?? 1_800_000);
 const MAX_TTL_MS = Number(process.env.PI_COMS_NET_MAX_TTL_MS ?? 1_209_600_000);
 const MAX_INBOX = Number(process.env.PI_COMS_NET_MAX_INBOX ?? 100);
+// Completed conversations (interactive prompt + reply) stay on disk this long
+// after completion so an agent's inbox doubles as its history (SIO-1620).
+const HISTORY_RETAIN_MS = Number(process.env.PI_COMS_NET_HISTORY_RETAIN_MS ?? 1_209_600_000);
 const HEARTBEAT_MS = Number(process.env.PI_COMS_NET_HEARTBEAT_MS ?? 10_000);
 const STALE_AFTER_MS = Number(process.env.PI_COMS_NET_STALE_AFTER_MS ?? 30_000);
 const OFFLINE_AFTER_MS = Number(process.env.PI_COMS_NET_OFFLINE_AFTER_MS ?? 60_000);
@@ -54,7 +57,7 @@ const AUTH_REFRESH_MS = Number(process.env.PI_COMS_NET_AUTH_REFRESH_MS ?? 60_000
 const DIRECTORY_MODE = Boolean(AUTH_FILE || AUTH_SSM_PATH);
 
 const STALE_SCAN_INTERVAL_MS = 5_000;
-const TTL_SCAN_INTERVAL_MS = 10_000;
+const TTL_SCAN_INTERVAL_MS = Number(process.env.PI_COMS_NET_TTL_SCAN_MS ?? 10_000);
 const SSE_KEEPALIVE_MS = 15_000;
 const DEFAULT_AWAIT_TIMEOUT_MS = 30_000;
 
@@ -610,7 +613,8 @@ export class MailStore {
 			expires_at: r.expires_at,
 		}));
 	}
-	// The durable inbox: mailbox-class messages addressed to a name, ascending
+	// The durable inbox for a name: mailbox-class messages (reports) plus every
+	// completed conversation addressed to it (prompt, status, reply), ascending
 	// by msg_id (ULIDs sort by creation time). Without `since`, the newest
 	// `limit` messages; with it, only newer ones.
 	inbox(
@@ -624,31 +628,39 @@ export class MailStore {
 		prompt: string;
 		status: string;
 		error: string | null;
+		response: unknown;
 		created_at: string;
 		delivered_at: string | null;
 		completed_at: string | null;
 	}[] {
 		const cols =
-			"msg_id, sender_name, target_name, prompt, status, error, created_at, delivered_at, completed_at";
-		if (since) {
-			return this.db.query(
-				`SELECT ${cols} FROM messages WHERE mailbox = 1 AND target_name = ? AND msg_id > ?
-				ORDER BY msg_id ASC LIMIT ?`,
-			).all(targetName, since, limit) as any[];
-		}
-		return this.db.query(
-			`SELECT * FROM (SELECT ${cols} FROM messages WHERE mailbox = 1 AND target_name = ?
-			ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC`,
-		).all(targetName, limit) as any[];
+			"msg_id, sender_name, target_name, prompt, status, error, response, created_at, delivered_at, completed_at";
+		const scope = "(mailbox = 1 OR status IN ('complete','error','timeout')) AND target_name = ?";
+		const rows = since
+			? this.db.query(
+				`SELECT ${cols} FROM messages WHERE ${scope} AND msg_id > ? ORDER BY msg_id ASC LIMIT ?`,
+			).all(targetName, since, limit)
+			: this.db.query(
+				`SELECT * FROM (SELECT ${cols} FROM messages WHERE ${scope}
+				ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC`,
+			).all(targetName, limit);
+		return (rows as any[]).map((r) => ({
+			...r,
+			response: r.response == null ? null : JSON.parse(r.response),
+		}));
 	}
 
-	// Retention horizon for the inbox: terminal mailbox rows live until their
-	// expiry. Non-terminal rows belong to the live sweep, which marks them
-	// expired in memory first.
-	purgeExpired(): void {
+	// Retention: terminal mailbox rows live until their expiry; completed
+	// conversations live retainMs past completion. Non-terminal rows belong to
+	// the live sweep, which marks them expired in memory first.
+	purgeExpired(retainMs = 1_209_600_000): void {
+		const now = Date.now();
 		this.db.query(
 			"DELETE FROM messages WHERE mailbox = 1 AND status IN ('complete','error','timeout') AND expires_at < ?",
-		).run(new Date().toISOString());
+		).run(new Date(now).toISOString());
+		this.db.query(
+			"DELETE FROM messages WHERE mailbox = 0 AND status IN ('complete','error','timeout') AND completed_at < ?",
+		).run(new Date(now - retainMs).toISOString());
 	}
 
 	close(): void {
@@ -1903,25 +1915,22 @@ function ttlScanTick(): void {
 					releaseAwaiters(p, id);
 					logExpired(id);
 					p.messages.delete(id);
-					mailFor(projectName).remove(id);
+					// An unanswered prompt is part of the target's history too.
+					mailFor(projectName).upsert(m);
 				}
 			} else if (m.status === "complete" || m.status === "error") {
-				if (
-					Number.isFinite(completedAt) &&
-					now - completedAt > MESSAGE_TTL_MS
-				) {
+				// Leave memory after the message TTL; the row stays on disk as
+				// inbox history until purgeExpired's retention removes it.
+				if (Number.isFinite(completedAt) && now - completedAt > MESSAGE_TTL_MS) {
 					p.messages.delete(id);
-					// Mailbox rows stay on disk as inbox history until expiry.
-					if (!m.mailbox) mailFor(projectName).remove(id);
 				}
 			} else if (m.status === "timeout") {
 				if (Number.isFinite(expires) && now > expires) {
 					p.messages.delete(id);
-					mailFor(projectName).remove(id);
 				}
 			}
 		}
-		mailFor(projectName).purgeExpired();
+		mailFor(projectName).purgeExpired(HISTORY_RETAIN_MS);
 	}
 }
 

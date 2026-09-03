@@ -48,6 +48,10 @@ When a session's SSE stream opens, the hub -- after `hello` and `pool_snapshot` 
 
 Mailbox-class messages double as history. A terminal (delivered and answered, or expired-in-queue) mailbox message is retained in `messages.db` until its TTL expires, and `GET /v1/mailbox?name=<name>&limit=&since=<msg_id>` reads it back non-destructively — every operator sees the same list whenever they connect, with `since` as a stateless cursor (ULID ids sort by time). The client tool is `coms_net_inbox` (defaults to your own name; pass a shared name like `ops`). Short-TTL interactive messages never enter the inbox. Flush-on-connect still happens, but as quiet mailbox-flagged events -- the inbox is the read path, not the push.
 
+### Conversation history
+
+Completed interactive prompts (an operator asking an agent, the agent's reply, or an expiry with no reply) stay in the same database for 14 days after completion (`PI_COMS_NET_HISTORY_RETAIN_MS`) and are read through the target's inbox: `coms_net_inbox name=eu-oit-dev` lists what that agent was asked, by whom, when, and what it answered. The `ops` inbox holds only mail addressed to `ops`. In-flight messages are not listed until they complete.
+
 ### Restart recovery
 
 On boot the hub reloads all non-terminal messages from every project's `messages.db`. Delivered-but-unanswered mail is re-queued by name (at-least-once delivery: a peer that answered just as the hub died may see the prompt again). A new `server_id`, same mail. The hub container mounts a named volume (`coms-hub-mail` -> `/home/bun/.pi/coms-net`) so mail also survives container recreation.
