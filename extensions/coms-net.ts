@@ -843,10 +843,13 @@ export default function (pi: ExtensionAPI) {
 	function scheduleReconnect(): void {
 		if (shuttingDown) return;
 		if (reconnectTimer) return;
-		const backoff = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts), RECONNECT_MAX_MS);
+		// Jitter (0.5x to 1.5x): the hub is a single instance, so after a hub
+		// restart the whole fleet must not retry in lockstep (SIO-1613).
+		const base = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts), RECONNECT_MAX_MS);
+		const backoff = Math.round(base * (0.5 + Math.random()));
 		reconnectAttempts++;
 		audit("sse_reconnect_scheduled", { attempt: reconnectAttempts, backoff_ms: backoff });
-		if (backoff >= RECONNECT_MAX_MS && !notifiedReconnectCap) {
+		if (base >= RECONNECT_MAX_MS && !notifiedReconnectCap) {
 			notifiedReconnectCap = true;
 			if (currentCtx?.hasUI) {
 				try { currentCtx.ui.notify("📡 coms-net: reconnect backoff at ceiling", "warning"); } catch { /* ignore */ }
@@ -905,6 +908,16 @@ export default function (pi: ExtensionAPI) {
 					project: identity.project,
 				});
 			} catch { /* best-effort */ }
+			// Mail addressed to the requested name will not reach this session;
+			// the operator has to know, not just the audit log (SIO-1613).
+			if (ctx?.hasUI) {
+				try {
+					ctx.ui.notify(
+						`coms-net: name "${identity.name}" was taken; registered as "${resp.agent.name}". Messages sent to "${identity.name}" will not reach you.`,
+						"warning",
+					);
+				} catch { /* ignore */ }
+			}
 			identity.name = resp.agent.name;
 		}
 		try {
@@ -1844,6 +1857,11 @@ export default function (pi: ExtensionAPI) {
 				if (sseAbort) {
 					try { sseAbort.abort(); } catch { /* ignore */ }
 					sseAbort = null;
+				}
+				// A scheduled reconnect must not race the manual one.
+				if (reconnectTimer) {
+					clearTimeout(reconnectTimer);
+					reconnectTimer = null;
 				}
 				reconnectAttempts = 0;
 				notifiedReconnectCap = false;
