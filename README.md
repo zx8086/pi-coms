@@ -3,13 +3,12 @@
 Peer-to-peer communication for [Pi Coding Agent](https://github.com/mariozechner/pi-coding-agent) instances, plus deployment for a multi-account AWS fleet. Two equal Pi agents talk to each other directly -- same machine, LAN, or across the internet through a shared hub. No orchestrator, no parent/child hierarchy.
 
 ```
-laptop pi ──────────┐
-aws-111111111111 ───┼──▶ hub (zero-permission relay)
-aws-222222222222 ───┤
-devops (VPS) ───────┘
+operator laptop ─────────────────┐
+eu-shared-services-dev + monitor ┼──▶ hub (zero-permission relay, private EC2)
+eu-oit-dev + monitor ────────────┘
 ```
 
-Each AWS account runs its own agent with a read-only IAM role; from one session you address any of them by name, or all of them at once. Each account host also runs a deterministic monitor (`monitor-aws-<account_id>`) that checks alarms, logs, drift, and cost on a schedule and mails findings through the hub's store-and-forward mailbox -- reports wait for you even when your session is offline.
+Each AWS account runs its own agent with a read-only IAM role; from one session you address any of them by name, or all of them at once. Each account host also runs a deterministic monitor (`monitor-<agent-name>`) that checks alarms, logs, drift, cost, certificates, and CloudTrail on a schedule and mails findings through the hub's store-and-forward mailbox -- reports wait in the shared `ops` inbox even when your session is offline.
 
 ## Prerequisites
 
@@ -61,28 +60,29 @@ For a remote hub, set `PI_COMS_NET_SERVER_URL` and `PI_COMS_NET_AUTH_TOKEN` in `
 
 From any client session:
 
-- "ask aws-111111111111 how many RDS instances it sees" -- routed via `coms_net_send` / `coms_net_await` to that one agent.
+- "ask eu-oit-dev how many RDS instances it sees" -- routed via `coms_net_send` / `coms_net_await` to that one agent.
 - "ask everyone to summarize their environment" -- `coms_net_broadcast` fans out to every online peer and returns each reply under its name.
 
 ## Account monitoring
 
-Each deployed AWS host runs `pi-monitor.service` (`scripts/coms-net-monitor.ts`): deterministic checks every 15 minutes (alarm transitions, log error scan, instance drift) and daily (cost vs a 14-day baseline), with zero token spend when quiet. Findings are investigated by the account's Pi agent and reported to `laptop` via the mailbox; a daily digest doubles as the dead-man signal. Prompt it directly: `ask monitor-aws-<account_id> for status`. Details in [`docs/architecture/monitoring.md`](docs/architecture/monitoring.md).
+Each deployed AWS host runs `pi-monitor.service` (`scripts/coms-net-monitor.ts`): deterministic checks every 15 minutes (alarm transitions, log error scan, infrastructure drift), hourly (log ingestion heartbeat), and daily (cost vs a 14-day baseline, CloudTrail status, certificate expiry, write-event watchlist), with zero token spend when quiet. Findings are investigated by the account's Pi agent and reported to the `ops` inbox via the mailbox; a daily digest doubles as the dead-man signal. Prompt it directly: `ask monitor-eu-oit-dev for status`. Details in [`docs/architecture/monitoring.md`](docs/architecture/monitoring.md).
 
 ## Tests
 
 ```bash
+bun run typecheck   # strict tsc over scripts/ and tests/
 bun test
 ```
 
-Unit tests cover the monitor checks, state, and report pipeline; integration tests spawn the real hub in a temp `HOME` to exercise the mailbox (queueing, flush-on-connect, restart recovery).
+Both gate `main` in CI (`.github/workflows/ci.yml`). Unit tests cover the monitor checks, state, and report pipeline; integration tests spawn the real hub in a temp `HOME` to exercise the mailbox (queueing, flush-on-connect, restart recovery).
 
 ## Deployment
 
-See [`deploy/README.md`](deploy/README.md): the hub as a Docker container behind any TLS proxy, a VPS bootstrap, and a Terraform module that puts one read-only Pi agent (plus its monitor) into each AWS account.
+See [`docs/deployment/deployment.md`](docs/deployment/deployment.md): a private EC2 hub, a Terraform module that puts one read-only Pi agent (plus its monitor) into each AWS account, and the S3 bundle every host converges from. Operational pitfalls are collected in [`docs/deployment/operations-gotchas.md`](docs/deployment/operations-gotchas.md).
 
 ## Safety rails
 
-- Hop limit (`PI_COMS_*_MAX_HOPS`, default 5) stops runaway forwarding loops.
+- Hop limit (`PI_COMS_NET_MAX_HOPS`, default 5) stops runaway forwarding loops.
 - Audit log of every send/receive (msg_id, sender, hops -- never prompt bodies).
 - Stale-peer detection: heartbeats every 10s; dead peers marked and pruned.
 - The hub refuses to bind beyond 127.0.0.1 without an explicit auth token.

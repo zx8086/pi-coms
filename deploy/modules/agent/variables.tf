@@ -1,7 +1,7 @@
 # deploy/modules/agent/variables.tf
 
 variable "hub_url" {
-  description = "coms-net hub base URL the agent registers with, e.g. https://coms.siobytes.cloud."
+  description = "coms-net hub base URL the agent registers with, e.g. http://10.34.89.51:8787 (the hub's pinned private IP)."
   type        = string
 }
 

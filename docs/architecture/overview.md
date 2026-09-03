@@ -31,7 +31,7 @@ eu-oit-dev ──────────────┘
 2. **The hub holds no power.** It relays messages and tracks liveness; it has no cloud permissions. The registry and streams are process memory (so it must run as exactly one instance), and its only durable state is the message mailbox -- a sqlite store-and-forward queue so long-TTL sends outlive restarts and offline recipients (see [Monitoring](monitoring.md#the-hub-mailbox)).
 3. **Outbound-only agents.** Cloud agents open an SSE stream to the hub and receive prompts over it. No agent host accepts inbound connections; account access is bounded by an IAM role, not by network position.
 4. **Replies are automatic.** An inbound prompt triggers a normal Pi turn; the final assistant message of that turn is submitted back to the caller by the extension. Tools are never used to reply (see [Communication](communication.md)).
-5. **One shared bootstrap.** All install and launch logic lives in one script parameterized by `SECRETS_SOURCE=aws|file`; the AWS userdata and VPS shims only set environment.
+5. **One shared bootstrap.** All install and launch logic lives in one script; the AWS userdata shim only sets environment.
 
 ## The transport
 
