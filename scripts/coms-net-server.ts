@@ -43,6 +43,8 @@ const MAX_INBOX = Number(process.env.PI_COMS_NET_MAX_INBOX ?? 100);
 const HEARTBEAT_MS = Number(process.env.PI_COMS_NET_HEARTBEAT_MS ?? 10_000);
 const STALE_AFTER_MS = Number(process.env.PI_COMS_NET_STALE_AFTER_MS ?? 30_000);
 const OFFLINE_AFTER_MS = Number(process.env.PI_COMS_NET_OFFLINE_AFTER_MS ?? 60_000);
+// Largest accepted request body; Bun answers 413 above it (prompts are KB-scale).
+const MAX_BODY_BYTES = Number(process.env.PI_COMS_NET_MAX_BODY_BYTES ?? 1_048_576);
 
 // Per-principal token directory (SIO-1577). Either source activates directory
 // mode; neither keeps the legacy single shared token exactly as before.
@@ -426,6 +428,22 @@ async function refreshTokenDirectory(): Promise<void> {
 			}
 		}
 	}
+}
+
+// Session ownership (SIO-1609). Single-token mode: every caller is the shared
+// principal. Root and any "*" principal act on every session; otherwise only
+// the principal that registered a session may act on it. Inbox reads are NOT
+// bound: the shared inbox is readable by every authenticated peer by design.
+function ownsSession(auth: AuthResult, entry: RegistryEntry): boolean {
+	if (!DIRECTORY_MODE) return true;
+	if (auth.principal.names.includes("*")) return true;
+	return entry.principal === auth.principal.principal;
+}
+
+// Project names become directory names under REG_ROOT; reject anything else.
+const PROJECT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function validProject(v: unknown): v is string {
+	return typeof v === "string" && PROJECT_RE.test(v);
 }
 
 function authenticate(req: Request): AuthResult | null {
@@ -916,6 +934,7 @@ async function handleRegister(req: Request, auth: AuthResult | null): Promise<Re
 	}
 	const principal = auth?.principal ?? LEGACY_PRINCIPAL;
 	const projectName = body.project || "default";
+	if (!validProject(projectName)) return errorJson("invalid_project", 400);
 	const p = getOrCreateProject(projectName);
 	const desiredName = body.name && body.name.length > 0 ? body.name : "agent";
 
@@ -1000,13 +1019,15 @@ async function handleRegister(req: Request, auth: AuthResult | null): Promise<Re
 	return json(resp);
 }
 
-function handleEvents(req: Request, url: URL): Response {
+function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 	const projectName = url.searchParams.get("project") ?? "default";
+	if (!validProject(projectName)) return errorJson("invalid_project", 400);
 	const session_id = url.searchParams.get("session_id") ?? "";
 	if (!session_id) return errorJson("missing_session_id", 400);
 	const p = getOrCreateProject(projectName);
 	const entry = p.agents.get(session_id);
 	if (!entry) return errorJson("agent_not_found", 404);
+	if (!ownsSession(auth, entry)) return errorJson("not_owner", 403);
 
 	const enc = new TextEncoder();
 	let writer: SseWriter | null = null;
@@ -1142,6 +1163,7 @@ function handleEvents(req: Request, url: URL): Response {
 async function handleHeartbeat(
 	req: Request,
 	sessionId: string,
+	auth: AuthResult,
 ): Promise<Response> {
 	let body: HeartbeatRequest;
 	try {
@@ -1150,10 +1172,12 @@ async function handleHeartbeat(
 		return errorJson("invalid_json", 400);
 	}
 	const projectName = body?.project ?? "default";
+	if (!validProject(projectName)) return errorJson("invalid_project", 400);
 	const p = state.projects.get(projectName);
 	if (!p) return errorJson("agent_not_found", 404);
 	const entry = p.agents.get(sessionId);
 	if (!entry) return errorJson("agent_not_found", 404);
+	if (!ownsSession(auth, entry)) return errorJson("not_owner", 403);
 
 	const before: Partial<AgentCard> = {
 		context_used_pct: entry.context_used_pct,
@@ -1221,7 +1245,7 @@ function handleListAgents(_req: Request, url: URL): Response {
 	return json({ agents: out });
 }
 
-async function handleSendMessage(req: Request): Promise<Response> {
+async function handleSendMessage(req: Request, auth: AuthResult): Promise<Response> {
 	let body: SendRequest;
 	try {
 		body = (await req.json()) as SendRequest;
@@ -1237,11 +1261,13 @@ async function handleSendMessage(req: Request): Promise<Response> {
 		return errorJson("invalid_request", 400);
 	}
 	const projectName = body.project ?? "default";
+	if (!validProject(projectName)) return errorJson("invalid_project", 400);
 	const p = state.projects.get(projectName);
 	if (!p) return errorJson("agent_not_found", 404);
 
 	const sender = p.agents.get(body.sender_session);
 	if (!sender) return errorJson("sender_not_registered", 404);
+	if (!ownsSession(auth, sender)) return errorJson("not_owner", 403);
 
 	const hops = typeof body.hops === "number" ? body.hops : 0;
 	if (hops >= MAX_HOPS) {
@@ -1426,8 +1452,18 @@ async function handleSendMessage(req: Request): Promise<Response> {
 // no longer in the in-memory map.
 function handleInbox(_req: Request, url: URL): Response {
 	const projectName = url.searchParams.get("project") ?? "default";
+	if (!validProject(projectName)) return errorJson("invalid_project", 400);
 	const name = (url.searchParams.get("name") ?? "").trim();
 	if (!name) return errorJson("missing_name", 400);
+	// Reads are open to every authenticated peer (shared inbox), but an unknown
+	// project must not create a store or a directory on disk.
+	if (
+		!state.projects.has(projectName) &&
+		!mailStores.has(projectName) &&
+		!fs.existsSync(path.join(projectDir(projectName), "messages.db"))
+	) {
+		return json({ ok: true, name, messages: [] });
+	}
 	const requested = Number(url.searchParams.get("limit") ?? 20);
 	const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 100) : 20;
 	const since = url.searchParams.get("since") ?? undefined;
@@ -1578,6 +1614,7 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 async function handleSubmitResponse(
 	req: Request,
 	msg_id: string,
+	auth: AuthResult,
 ): Promise<Response> {
 	let body: ResponseSubmitRequest;
 	try {
@@ -1606,6 +1643,11 @@ async function handleSubmitResponse(
 	if (body.responder_session !== msg.target_session) {
 		return errorJson("not_target", 403);
 	}
+	// Directory mode: only the principal holding the target session may answer.
+	const responder = project.agents.get(body.responder_session);
+	if (DIRECTORY_MODE && (!responder || !ownsSession(auth, responder))) {
+		return errorJson("not_owner", 403);
+	}
 	if (
 		msg.status === "complete" ||
 		msg.status === "error" ||
@@ -1621,8 +1663,6 @@ async function handleSubmitResponse(
 	msg.completed_at = nowIso();
 	mailFor(msg.project).upsert(msg);
 
-	// Look up responder name for the SSE response payload.
-	const responder = project.agents.get(body.responder_session);
 	const responderName = responder?.name ?? "unknown";
 
 	// Notify sender (if its stream is open).
@@ -1654,12 +1694,14 @@ async function handleSubmitResponse(
 	return json({ ok: true });
 }
 
-function handleDeleteAgent(_req: Request, url: URL, sessionId: string): Response {
+function handleDeleteAgent(_req: Request, url: URL, sessionId: string, auth: AuthResult): Response {
 	const projectName = url.searchParams.get("project") ?? "default";
+	if (!validProject(projectName)) return errorJson("invalid_project", 400);
 	const p = state.projects.get(projectName);
 	if (!p) return errorJson("agent_not_found", 404);
 	const entry = p.agents.get(sessionId);
 	if (!entry) return errorJson("agent_not_found", 404);
+	if (!ownsSession(auth, entry)) return errorJson("not_owner", 403);
 
 	// Close stream first; the abort handler may also fire.
 	const stream = p.streams.get(sessionId);
@@ -1729,7 +1771,7 @@ async function router(req: Request): Promise<Response> {
 
 	// 3. GET /v1/events
 	if (pathname === "/v1/events" && method === "GET") {
-		return handleEvents(req, url);
+		return handleEvents(req, url, auth);
 	}
 
 	// 5. GET /v1/agents
@@ -1739,7 +1781,7 @@ async function router(req: Request): Promise<Response> {
 
 	// 6. POST /v1/messages
 	if (pathname === "/v1/messages" && method === "POST") {
-		return handleSendMessage(req);
+		return handleSendMessage(req, auth);
 	}
 
 	// 7. GET /v1/mailbox (durable inbox, read-many)
@@ -1755,10 +1797,10 @@ async function router(req: Request): Promise<Response> {
 		const sessionId = decodeURIComponent(agentMatch[1]);
 		const tail = agentMatch[2];
 		if (tail === "heartbeat" && method === "POST") {
-			return handleHeartbeat(req, sessionId);
+			return handleHeartbeat(req, sessionId, auth);
 		}
 		if (!tail && method === "DELETE") {
-			return handleDeleteAgent(req, url, sessionId);
+			return handleDeleteAgent(req, url, sessionId, auth);
 		}
 		return errorJson("method_not_allowed", 405);
 	}
@@ -1777,7 +1819,7 @@ async function router(req: Request): Promise<Response> {
 			return handleAwaitMessage(req, url, msg_id);
 		}
 		if (tail === "response" && method === "POST") {
-			return handleSubmitResponse(req, msg_id);
+			return handleSubmitResponse(req, msg_id, auth);
 		}
 		return errorJson("method_not_allowed", 405);
 	}
@@ -1978,6 +2020,7 @@ export async function main(): Promise<void> {
 		hostname: HOST,
 		port: PORT,
 		fetch: router,
+		maxRequestBodySize: MAX_BODY_BYTES,
 		// Bun's default idle timeout is 10s — bump it so SSE doesn't get cut.
 		idleTimeout: 0,
 	});

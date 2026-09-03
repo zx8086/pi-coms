@@ -76,6 +76,8 @@ The local `coms` transport relies on the hop counter alone; its inbound injectio
 | Hop limit | `hops` increments when a send happens inside an inbound-triggered turn; sends at the ceiling are rejected by client and hub | 5 (`PI_COMS_NET_MAX_HOPS` / `PI_COMS_MAX_HOPS`) |
 | Ping-pong guard | Injected guard text plus tool-description warnings (coms-net) | -- |
 | Inbox cap | Hub rejects sends when the target has 100 undelivered or unanswered messages | `PI_COMS_NET_MAX_INBOX` |
+| Body cap | Hub rejects request bodies above 1 MiB with 413 | `PI_COMS_NET_MAX_BODY_BYTES` |
+| Session ownership | In directory mode only the registering principal (or root) may open a session's stream, heartbeat, delete, send as, or answer for it (`403 not_owner`); inbox reads stay open to every principal | directory mode |
 | Message TTL | Undelivered or unanswered messages expire | 30 min (`PI_COMS_NET_MESSAGE_TTL_MS`); per-send `ttl_ms` capped at 14 d (`PI_COMS_NET_MAX_TTL_MS`) |
 | Audit log | Every send/receive/response logged with `msg_id`, names, hops -- never prompt or response bodies | -- |
 
