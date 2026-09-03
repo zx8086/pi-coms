@@ -63,6 +63,27 @@ else
   sudo -u "$HUB_USER" -H git clone --depth 1 '${repo_url}' "$HUB_HOME/pi-coms"
 fi
 
+# ── Mailbox volume ─────────────────────────────────────────────────────────
+# The shared inbox lives on a separate EBS volume that outlives this
+# instance. The attachment lands a little after first boot, so wait for the
+# device; format only when it carries no filesystem (first boot ever), then
+# mount it where the hub keeps its registry and mailbox.
+MAILBOX_DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${mailbox_volume_id}"
+MAILBOX_MNT="$HUB_HOME/.pi/coms-net"
+for i in $(seq 1 60); do
+  [ -e "$MAILBOX_DEV" ] && break
+  sleep 5
+done
+[ -e "$MAILBOX_DEV" ] || { echo "mailbox volume $MAILBOX_DEV not attached after 5 min" >&2; exit 1; }
+if [ -z "$(blkid -s TYPE -o value "$MAILBOX_DEV")" ]; then
+  mkfs.xfs -q "$MAILBOX_DEV"
+fi
+mkdir -p "$MAILBOX_MNT"
+grep -q " $MAILBOX_MNT " /etc/fstab \
+  || echo "$MAILBOX_DEV $MAILBOX_MNT xfs defaults,noatime,nofail,x-systemd.device-timeout=60 0 2" >> /etc/fstab
+mountpoint -q "$MAILBOX_MNT" || mount "$MAILBOX_MNT"
+chown "$HUB_USER:$HUB_USER" "$HUB_HOME/.pi" "$MAILBOX_MNT"
+
 TOKEN="$(aws ssm get-parameter \
   --name '${token_param_name}' --region '${region}' \
   --with-decryption --query Parameter.Value --output text)"
@@ -88,6 +109,7 @@ cat > /etc/systemd/system/coms-hub.service <<UNIT
 Description=coms-net hub
 After=network-online.target
 Wants=network-online.target
+RequiresMountsFor=$HUB_HOME/.pi/coms-net
 
 [Service]
 Type=simple

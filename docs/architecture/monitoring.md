@@ -54,6 +54,9 @@ Completed interactive prompts (an operator asking an agent, the agent's reply, o
 
 ### Restart recovery
 
+The mailbox database sits on a dedicated EBS volume mounted at `~/.pi/coms-net` on the hub host, so it survives a hub process restart, a reboot, and a Terraform instance replacement alike. What it does not survive: loss of that single volume or its availability zone, and the message TTL (14 days by default) still bounds retention.
+
+
 On boot the hub reloads all non-terminal messages from every project's `messages.db`. Delivered-but-unanswered mail is re-queued by name (at-least-once delivery: a peer that answered just as the hub died may see the prompt again). A new `server_id`, same mail. The hub container mounts a named volume (`coms-hub-mail` -> `/home/bun/.pi/coms-net`) so mail also survives container recreation.
 
 ### What changed about the hub's trust posture

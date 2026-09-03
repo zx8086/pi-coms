@@ -138,12 +138,13 @@ resource "aws_instance" "hub" {
   user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/userdata.sh.tftpl", {
-    token_param_name = aws_ssm_parameter.coms_token.name
-    region           = local.region
-    repo_url         = var.repo_url
-    port             = var.port
-    bundle_s3_uri    = var.bundle_s3_uri
-    auth_ssm_path    = var.auth_ssm_path
+    token_param_name  = aws_ssm_parameter.coms_token.name
+    region            = local.region
+    repo_url          = var.repo_url
+    port              = var.port
+    bundle_s3_uri     = var.bundle_s3_uri
+    auth_ssm_path     = var.auth_ssm_path
+    mailbox_volume_id = replace(aws_ebs_volume.mailbox.id, "-", "")
   })
 
   metadata_options {
@@ -160,4 +161,32 @@ resource "aws_instance" "hub" {
   tags = { Name = "${var.name_prefix}-hub" }
 
   depends_on = [aws_ssm_parameter.coms_token]
+}
+
+// ── Mailbox volume ─────────────────────────────────────────────────────────
+// The shared inbox (sqlite under ~/.pi/coms-net) lives on its own volume so
+// it outlives the instance: user_data_replace_on_change and AMI replaces
+// rebuild the host, and the root volume goes with it. prevent_destroy makes
+// deleting the inbox history an explicit act; skip_destroy on the attachment
+// lets a replacement terminate the old host (which releases the volume)
+// without a forced detach, and the new host re-attaches and mounts it.
+
+resource "aws_ebs_volume" "mailbox" {
+  availability_zone = data.aws_subnet.chosen.availability_zone
+  size              = 10
+  type              = "gp3"
+  encrypted         = true
+
+  tags = { Name = "${var.name_prefix}-hub-mailbox" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_volume_attachment" "mailbox" {
+  device_name  = "/dev/sdf"
+  volume_id    = aws_ebs_volume.mailbox.id
+  instance_id  = aws_instance.hub.id
+  skip_destroy = true
 }
