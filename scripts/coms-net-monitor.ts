@@ -269,7 +269,7 @@ function main(): void {
 	const investigate = async (
 		findings: Finding[],
 		prior: string,
-	): Promise<Map<string, Diagnosis> | null> => {
+	): Promise<InvestigationOutcome> => {
 		const prompt = [
 			`You are the read-only devops agent for AWS account ${ACCOUNT_ID}. The account monitor detected these findings; investigate with your AWS tools and diagnose each one.`,
 			'Reply ONLY with JSON matching the response schema: an object {"diagnoses": [...]} with one entry per dedup_key.',

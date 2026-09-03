@@ -1,10 +1,10 @@
 // tests/monitor-coms.integration.test.ts
 import { afterEach, describe, expect, test } from "bun:test";
 import { MonitorComs } from "../scripts/monitor/coms.ts";
-import { activeHubs, startHub, stopHub, TOKEN } from "./harness.ts";
+import { startHub, stopAllHubs, TOKEN } from "./harness.ts";
 
 afterEach(async () => {
-	while (activeHubs.length) await stopHub(activeHubs[activeHubs.length - 1]);
+	await stopAllHubs();
 });
 
 describe("MonitorComs", () => {

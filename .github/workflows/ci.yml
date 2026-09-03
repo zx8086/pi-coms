@@ -1,0 +1,30 @@
+# .github/workflows/ci.yml
+# Gate for main: main auto-publishes to the fleet, so nothing merges untested.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - uses: hashicorp/setup-terraform@v3
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - name: extension syntax
+        run: bun build extensions/coms-net.ts --external '*' --outfile /dev/null
+      - name: shell syntax
+        run: |
+          bash -n deploy/bootstrap/agent-bootstrap.sh
+          bash -n deploy/publish-fleet.sh
+          bash -n deploy/token-admin.sh
+      - name: terraform fmt
+        run: terraform fmt -check -recursive deploy/

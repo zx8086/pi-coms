@@ -57,7 +57,7 @@ describe("runCycle", () => {
 			checks: [{ name: "alarms", run: async () => [F({ severity: "info", dedup_key: "alarm:cpu:OK" })] }],
 			investigate: async () => {
 				investigated = true;
-				return new Map();
+				return { diagnoses: new Map(), failure: null };
 			},
 		});
 		await runCycle(d);

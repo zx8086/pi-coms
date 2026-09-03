@@ -12,7 +12,7 @@ Peer-to-peer messaging between Pi Coding Agent instances (`coms` over Unix socke
 - Task runner: `just`; run `just` with no args to list recipes.
 - Run a client: `just coms --name <n> --cname <n>` (coms-net) or `just local-coms --name <n>` (same-machine).
 - Hub: `just coms-net-server` (localhost) or `just coms-net-server-lan` (requires `PI_COMS_NET_AUTH_TOKEN`).
-- Tests: `bun test` (unit tests for monitor checks/state/report/cycle; integration tests spawn the real hub with `HOME` in a temp dir). No linter or build step; extensions load from source via Pi's jiti runtime. Syntax-check with `bun build extensions/<f>.ts --external '*' --outfile /dev/null`.
+- Tests: `bun test` (unit tests for monitor checks/state/report/cycle; integration tests spawn the real hub with `HOME` in a temp dir). Typecheck: `bun run typecheck` (strict `tsc --noEmit` over `scripts/` and `tests/`; `extensions/` is excluded because Pi's packages resolve from the global Pi install, not `node_modules`). Both gate `main` via `.github/workflows/ci.yml`. No build step; extensions load from source via Pi's jiti runtime. Syntax-check an extension with `bun build extensions/<f>.ts --external '*' --outfile /dev/null`.
 - Pi does not auto-load `.env`; `just` recipes do (`set dotenv-load`).
 
 ## Architecture

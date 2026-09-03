@@ -1,12 +1,18 @@
 // tests/mailstore.test.ts
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { MailStore, type ComsMessage } from "../scripts/coms-net-server.ts";
 
+const tmpDirs: string[] = [];
+afterAll(() => {
+	for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+});
+
 function tmpDb(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mailstore-"));
+	tmpDirs.push(dir);
 	return path.join(dir, "messages.db");
 }
 
