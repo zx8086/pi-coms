@@ -42,6 +42,34 @@ describe("MonitorComs", () => {
 		await peer.stop();
 	});
 
+	test("pending entries are bounded: fire-and-forget sends park nothing, awaited replies clear, cap holds", async () => {
+		const hub = await startHub();
+		const agent = new MonitorComs({
+			serverUrl: hub.url, token: TOKEN, project: "default", name: "monitor-aws-123",
+			purpose: "t", onPrompt: async (p) => `pong:${p.prompt}`,
+		});
+		await agent.start();
+		const peer = new MonitorComs({
+			serverUrl: hub.url, token: TOKEN, project: "default", name: "ops",
+			purpose: "t", onPrompt: async () => "ok",
+		});
+		await peer.start();
+
+		await agent.send("ops", "digest", { ttl_ms: 86_400_000, expectReply: false });
+		expect(agent.pendingSize()).toBe(0);
+
+		const sent = await peer.send("monitor-aws-123", "status");
+		expect(peer.pendingSize()).toBe(1);
+		await peer.awaitReply(sent.msg_id, 10_000);
+		expect(peer.pendingSize()).toBe(0);
+
+		for (let i = 0; i < 250; i++) await agent.send("ops", `r${i}`, { ttl_ms: 86_400_000 });
+		expect(agent.pendingSize()).toBe(200);
+
+		await agent.stop();
+		await peer.stop();
+	});
+
 	test("long-ttl send to an offline name queues", async () => {
 		const hub = await startHub();
 		const agent = new MonitorComs({
