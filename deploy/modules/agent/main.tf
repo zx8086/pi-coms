@@ -426,6 +426,10 @@ resource "aws_instance" "agent" {
   associate_public_ip_address = var.associate_public_ip
 
   user_data_replace_on_change = true
+  # The rendered userdata is hashed: any byte change in userdata.sh.tftpl (even
+  # a comment or the unused SECRETS_SOURCE export) replaces the instance. Edit
+  # the template only when replacing the agents on purpose; put behaviour
+  # changes in the bootstrap, which the S3 bundle delivers without a replace.
 
   user_data = templatefile("${path.module}/userdata.sh.tftpl", {
     hub_url              = var.hub_url

@@ -16,6 +16,16 @@ remove an entry when the underlying behavior changes.
 - Replacing the hub instance loses its on-instance sqlite mailbox (queued
   and historical inbox rows). The pinned private IP means spokes reconnect
   unchanged.
+- The rendered agent userdata is hashed. Any byte change to
+  `deploy/modules/agent/userdata.sh.tftpl`, a comment included, replaces
+  every agent instance in every account. Behaviour changes go in the
+  bootstrap (delivered by the S3 bundle); touch the template only when
+  replacing agents on purpose.
+- Never give `module "agent"` a `depends_on` on `module "hub"`: it defers the
+  agent module's data sources to apply time, the security group's `vpc_id`
+  becomes unknown, and Terraform replaces the SG and the instance whenever
+  the hub changes. `terraform apply -target=module.hub` is the escape hatch
+  if a plan ever couples them again.
 
 ## SSM
 

@@ -173,8 +173,9 @@ module "agent" {
   readonly_role       = true
   bundle_s3_uri       = local.bundle_s3_uri
   dist_bucket_arn     = aws_s3_bucket.dist.arn
-
-  depends_on = [module.hub]
+  # No depends_on on module.hub: it would defer this module's data sources to
+  # apply time whenever the hub changes, and an unknown vpc_id replaces the
+  # security group and the instance. The launch script polls the hub itself.
 }
 
 // ── Convergence ────────────────────────────────────────────────────────────
