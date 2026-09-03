@@ -95,6 +95,8 @@ Watermarks, fingerprints, and snapshots all persist in `state.db`, so a monitor 
 
 Operator-accepted imperfections (`suppress <pattern> | <reason>`) live in a `suppressions` table; patterns are SQL `LIKE` against `dedup_key`, so `alarm:%-Utilization-Low-20%` covers a whole alarm family. A matching finding is journaled (`suppressed_finding`), never investigated, and never in the report body -- the incident report carries a one-line footnote count and the digest a daily total. This is the anti-fatigue device: a periodic report is read hundreds of times, and known, accepted imperfections must not re-raise as fresh findings.
 
+The counterweight is the scheduled suppression review (weekly by default): a mailed report listing every ledger entry with its reason, age, match count in the window, and sample dedup keys. Entries with zero matches are flagged as unsuppress candidates; a high-count entry is a prompt to re-examine what the pattern is actually eating. The same text is available on demand via the `review` command.
+
 The agent module provisions one alarm itself -- `<name_prefix>-agent-status-check` (`StatusCheckFailed` on the agent host, no actions) -- so the alarm family always has a real signal even in an account with no other alarms: a degraded agent host becomes a critical incident report instead of silence.
 
 ### Investigation
@@ -119,6 +121,7 @@ Any peer can prompt the monitor by name; it answers without a model:
 | `run-checks` | Runs the 15-minute check families now (guarded against overlapping with the cron run) |
 | `status` | Liveness, last run, 24 h finding/suppressed/check-error counts, unsent report count |
 | `digest` | The current digest, on demand |
+| `review` | The suppression review, on demand |
 | `history` | Last 20 journaled findings (7 days) |
 | `suppressions` | The suppression ledger |
 | `suppress <pattern> \| <reason>` | Add a ledger entry (`LIKE` pattern against dedup keys, reason required) |
@@ -140,6 +143,8 @@ Env-with-defaults; no config files. Set in the systemd unit environment or `~/.c
 | `PI_MONITOR_CHECK_CRON` | `*/15 * * * *` | Alarm/log/drift cadence |
 | `PI_MONITOR_HOURLY_CRON` | `7 * * * *` | Ingestion heartbeat (minute 7: never a */15 boundary) |
 | `PI_MONITOR_DAILY_CRON` | `@daily` | Cost/trail/certs/watchlist + digest (midnight UTC) |
+| `PI_MONITOR_REVIEW_CRON` | `@weekly` | Suppression review mail (monthly: `0 0 1 * *` + window 31) |
+| `PI_MONITOR_REVIEW_WINDOW_DAYS` | `7` | Match window the review counts over |
 | `PI_MONITOR_INVESTIGATE_TARGET` | `aws-<account_id>` | Peer that investigates findings |
 | `PI_MONITOR_INVESTIGATE_TIMEOUT_MS` | `300000` (5 min) | Investigation deadline base |
 | `PI_MONITOR_INVESTIGATE_PER_FINDING_MS` | `60000` (1 min) | Added to the deadline per finding in the batch |

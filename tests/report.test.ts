@@ -6,8 +6,10 @@ import {
 	FindingSchema,
 	formatDigest,
 	formatIncidentReport,
+	formatSuppressionReview,
 	notablesFromJournal,
 	parseDiagnoses,
+	suppressionReviewFromJournal,
 } from "../scripts/monitor/report.ts";
 
 const finding = {
@@ -250,5 +252,63 @@ describe("notablesFromJournal", () => {
 	test("skips unparseable rows instead of throwing", () => {
 		const notables = notablesFromJournal([{ payload: "not json" }, row({ ...finding, diagnosis: null })]);
 		expect(notables).toHaveLength(1);
+	});
+});
+
+describe("suppression review", () => {
+	const ledger = [
+		{ pattern: "alarm:%-Utilization-Low-20:%", reason: "accepted dev rightsizing noise", created_at: "2026-09-01T09:34:00Z" },
+		{ pattern: "logs:/aws/msk/brokers:%", reason: "msk rebalance chatter", created_at: "2026-09-01T09:35:00Z" },
+	];
+	const supRow = (suppressed_by: string, dedup_key: string) => ({
+		payload: JSON.stringify({ family: "alarm", dedup_key, suppressed_by, reason: "r" }),
+	});
+
+	test("builder counts matches per ledger entry and caps distinct samples at 3", () => {
+		const rows = [
+			supRow("alarm:%-Utilization-Low-20:%", "alarm:kong:ALARM"),
+			supRow("alarm:%-Utilization-Low-20:%", "alarm:kong:ALARM"),
+			supRow("alarm:%-Utilization-Low-20:%", "alarm:a:ALARM"),
+			supRow("alarm:%-Utilization-Low-20:%", "alarm:b:ALARM"),
+			supRow("alarm:%-Utilization-Low-20:%", "alarm:c:ALARM"),
+		];
+		const entries = suppressionReviewFromJournal(ledger, rows);
+		expect(entries).toHaveLength(2);
+		expect(entries[0].matches).toBe(5);
+		expect(entries[0].sampleKeys).toHaveLength(3);
+		expect(entries[0].sampleKeys[0]).toBe("alarm:kong:ALARM");
+		expect(entries[1].matches).toBe(0);
+	});
+
+	test("builder skips unparseable journal rows", () => {
+		const entries = suppressionReviewFromJournal(ledger, [
+			{ payload: "not json" },
+			supRow("logs:/aws/msk/brokers:%", "logs:/aws/msk/brokers:x"),
+		]);
+		expect(entries[1].matches).toBe(1);
+	});
+
+	test("formatter renders header, entries, and flags zero-match entries", () => {
+		const text = formatSuppressionReview({
+			accountId: "120999474587",
+			windowDays: 7,
+			entries: [
+				{ ...ledger[0], matches: 43, sampleKeys: ["alarm:kong:ALARM"] },
+				{ ...ledger[1], matches: 0, sampleKeys: [] },
+			],
+		});
+		expect(text.split("\n")[0]).toBe("[info] aws-120999474587 suppression review (last 7d)");
+		expect(text).toContain("alarm:%-Utilization-Low-20:%");
+		expect(text).toContain("accepted dev rightsizing noise");
+		expect(text).toContain("matches last 7d: 43");
+		expect(text).toContain("alarm:kong:ALARM");
+		const zeroLine = text.split("\n").filter((l) => l.includes("msk"));
+		expect(text).toContain("no matches in 7d; candidate for unsuppress");
+	});
+
+	test("formatter renders an explicit nothing-masked line for an empty ledger", () => {
+		const text = formatSuppressionReview({ accountId: "120999474587", windowDays: 7, entries: [] });
+		expect(text).toContain("suppression ledger is empty");
+		expect(text).toContain("nothing is being masked");
 	});
 });
