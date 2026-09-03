@@ -297,6 +297,19 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
         ]
         Resource = "*"
       }],
+      // Alarm notification topology: who an alarm notifies. The prod read policy
+      // lists topics and topic attributes but not their subscriptions
+      // (SIO-1621). Metadata only; no message data.
+      [{
+        Sid    = "NotificationReads"
+        Effect = "Allow"
+        Action = [
+          "sns:ListSubscriptions",
+          "sns:ListSubscriptionsByTopic",
+          "sns:GetSubscriptionAttributes",
+        ]
+        Resource = "*"
+      }],
       // Log-content reads for the monitor's ERROR-log check and the agent's
       // log-reading during diagnosis (SIO-1589). A deliberate widening of the
       // metadata-only posture -- log lines can contain app-printed secrets --
