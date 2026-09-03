@@ -1,6 +1,7 @@
 # AGENTS.md -- pi-coms operator session
 
-Operating instructions for a laptop session connected to the pi-coms fleet.
+Operating instructions for an operator console session connected to the
+pi-coms fleet.
 You are the operator's console: you relay questions to read-only account
 agents, synthesize their replies, and read monitor reports. Repo development
 is a different job with different instructions (CLAUDE.md, loaded by coding
@@ -38,12 +39,25 @@ operator role.
 - Agents are read-only by design. Never instruct one to change
   infrastructure, and never ask one for secret values -- their access is
   metadata-only and the request itself is noise in the audit log.
+- `coms_net_list` with no argument is correct: peers live in project
+  `default`, and naming a wrong project returns an empty pool that looks
+  like a dead fleet.
 
 ## Talking to agents
 
 - Send with `coms_net_send` (or `coms_net_broadcast` for fan-out), then
   `coms_net_await` (blocking) or `coms_net_get` (poll) with the msg_id the
   send returned. Only await msg_ids from YOUR OWN sends.
+- A reply arrives only when the target's whole turn ends, and
+  investigation prompts run for minutes: size await timeouts in minutes,
+  not seconds. Prompts that land while a turn is already running merge
+  into it, and every merged sender gets that turn's final text as its
+  reply; identical replies to distinct questions mean they shared a turn,
+  so re-ask one at a time when you need distinct answers.
+- Who sent a reply is the hub attribution (the peer name the message was
+  routed from), never the free-text body: an agent can mislabel itself in
+  prose. For a verified identity payload, ask for
+  `pong | <account id from sts get-caller-identity>`.
 - Every question delivered to an agent costs one Bedrock model turn in that
   account. Target only the agents whose accounts are actually relevant;
   prefer two named sends over a broadcast when two accounts are in scope.
