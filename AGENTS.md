@@ -76,8 +76,10 @@ operator role.
   coms_net_send/coms_net_await/coms_net_get to reply; that loops.
 - A `[coms-net mail]` notice means mail (usually a monitor report) landed in
   the durable inbox. It deliberately does not start a turn. Read it only
-  when the operator asks, with `coms_net_inbox` (defaults to your own name;
-  ULID msg_ids sort by time, `since` continues from a known id).
+  when the operator asks, with `coms_net_inbox`. It reads the shared `ops`
+  inbox by default; "my inbox", "the inbox", and "the ops inbox" all mean
+  that one, never your own name (ULID msg_ids sort by time, `since`
+  continues from a known id).
 - Inbox listings show preview bodies. A message ending in `…` was cut:
   before summarizing it, re-read it in full with `coms_net_inbox` and its
   `msg_id`. Never report a finding count or family from a truncated body

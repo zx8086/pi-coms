@@ -33,6 +33,9 @@ const HEARTBEAT_MS = Number(process.env.PI_COMS_NET_HEARTBEAT_MS) || 10_000;
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
 const MESSAGE_TIMEOUT_MS = Number(process.env.PI_COMS_NET_MESSAGE_TTL_MS) || 1_800_000;
+// The shared duty inbox every monitor reports to; coms_net_inbox reads it by
+// default. A personal inbox is never the intended read (SIO-1618).
+const INBOX_NAME = process.env.PI_COMS_NET_INBOX_NAME || "ops";
 const HTTP_TIMEOUT_MS = 10_000;
 const SHUTDOWN_DELETE_TIMEOUT_MS = 2_000;
 
@@ -1434,18 +1437,18 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Read a durable inbox: long-TTL mailbox messages (e.g. monitor reports) are retained on the hub until their TTL expires and stay readable by everyone. " +
 			"Non-destructive and identical for every reader, so any operator connecting at any time sees the same messages on demand. " +
-			"Defaults to your own registered name; pass name to read a shared inbox like \"ops\". " +
+			`Reads the shared duty inbox "${INBOX_NAME}" unless name says otherwise; every operator sees the same history. ` +
 			"Use since with a msg_id to fetch only newer messages. " +
 			"Listing bodies are previews; pass msg_id to read one message in full (e.g. a monitor incident report whose findings run past the preview).",
 		parameters: Type.Object({
-			name: Type.Optional(Type.String({ description: "Inbox name to read (default: your own registered name)." })),
+			name: Type.Optional(Type.String({ description: `Inbox name to read (default: the shared "${INBOX_NAME}" inbox).` })),
 			limit: Type.Optional(Type.Number({ description: "Maximum messages to return (default 10, server cap 100)." })),
 			since: Type.Optional(Type.String({ description: "Only messages newer than this msg_id (ascending)." })),
 			msg_id: Type.Optional(Type.String({ description: "Return only this message, with its full untruncated body." })),
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");
-			const name = ((params as any).name as string | undefined) || identity.name;
+			const name = ((params as any).name as string | undefined) || INBOX_NAME;
 			const msgId = (params as any).msg_id as string | undefined;
 			// A full-body read must find its target: search at the server cap
 			// unless the caller narrowed the fetch explicitly.
