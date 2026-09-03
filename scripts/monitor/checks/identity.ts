@@ -2,10 +2,7 @@
 import { GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
-
-export interface AwsClient {
-	send(cmd: any): Promise<any>;
-}
+import type { AwsClient } from "./alarms.ts";
 
 export type GateResult = { findings: Finding[]; healthy: boolean };
 

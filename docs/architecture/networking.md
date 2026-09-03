@@ -1,16 +1,6 @@
 # Networking
 
-How pi-coms components find each other and what travels over the wire. Two transports exist: Unix sockets for same-machine peers (`coms`) and HTTP plus Server-Sent Events (SSE) for networked peers (`coms-net`). This document covers listeners, ports, discovery, and the path a byte takes from a laptop to an AWS agent.
-
-## Transport comparison
-
-| | `coms` (local) | `coms-net` (networked) |
-|---|---|---|
-| Transport | Unix sockets / named pipes | HTTP + SSE |
-| Scope | One machine | Same machine, LAN, or remote URL |
-| Server | None -- agents listen directly | `scripts/coms-net-server.ts` |
-| Registry | Files under `~/.pi/coms/` | Hub process memory |
-| Auth | OS file permissions | Bearer token on every `/v1/*` request |
+How pi-coms components find each other and what travels over the wire: HTTP plus Server-Sent Events (SSE) between every peer and one hub (`scripts/coms-net-server.ts`), whether the peers share a machine, a LAN, or a Transit Gateway. This document covers listeners, ports, discovery, and the path a byte takes from a laptop to an AWS agent.
 
 ---
 
@@ -44,7 +34,7 @@ In the corp deployment the hub is a private EC2 host in shared-services (systemd
 
 A coms-net client finds its hub in one of two ways:
 
-1. **Explicit configuration**: `--server-url`/`--auth-token` flags or `PI_COMS_NET_SERVER_URL`/`PI_COMS_NET_AUTH_TOKEN` environment variables. This is how every deployed agent and `connect.sh` work.
+1. **Explicit configuration**: `--server-url`/`--auth-token` flags or `PI_COMS_NET_SERVER_URL`/`PI_COMS_NET_AUTH_TOKEN` environment variables. This is how every deployed agent and every operator laptop work.
 2. **Local discovery file**: a hub writes `~/.pi/coms-net/projects/<project>/server.json` at startup and unlinks it on shutdown (`scripts/coms-net-server.ts:1472-1485`). Clients on the same machine read it to find the URL.
 
 `server.json` contents (never includes the token):

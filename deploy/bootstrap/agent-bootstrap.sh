@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
 # deploy/bootstrap/agent-bootstrap.sh
 #
-# Provider-agnostic bootstrap for a cloud Pi coms-net agent. Installs Bun, Pi,
-# and Herdr, then runs Pi inside a headless Herdr pane wired to a coms-net hub.
+# Bootstrap for an AWS-hosted Pi coms-net agent. Installs Bun, Pi, and Herdr,
+# then runs Pi inside a headless Herdr pane wired to a coms-net hub.
 # Idempotent -- safe to re-run. Run as root.
 #
-# Callers are thin shims that set the environment contract below and exec this
-# script: deploy/modules/agent/userdata.sh.tftpl (AWS EC2 userdata) and
-# deploy/hostinger/bootstrap-agent.sh (VPS).
+# The caller is the thin userdata shim deploy/modules/agent/userdata.sh.tftpl,
+# which sets the environment contract below and execs this script.
 #
 # Environment contract
 #   Required:
 #     AGENT_NAME                --cname the agent registers under
-#     PI_COMS_NET_SERVER_URL   hub base URL (http://127.0.0.1:8787 or https://...)
-#     SECRETS_SOURCE           "aws" or "file"
-#   SECRETS_SOURCE=aws:
+#     PI_COMS_NET_SERVER_URL   hub base URL (http://10.x.x.x:8787)
 #     COMS_TOKEN_PARAM         SSM SecureString parameter name holding the bearer token
 #     PROVIDER_KEYS_PARAM      SSM SecureString parameter name holding a JSON object of
 #                              provider API keys, e.g. {"OPENAI_API_KEY":"sk-..."}
 #     AWS_REGION               region for the CLI calls; exported to the agent
-#   SECRETS_SOURCE=file:
-#     COMS_TOKEN_ENV_FILE      env file containing PI_COMS_NET_AUTH_TOKEN=...
-#     PROVIDER_KEYS_ENV_FILE   env file of KEY=VALUE provider API keys
 #   Optional:
 #     AGENT_USER      (default piagent)
 #     AGENT_PURPOSE   (default derived from AGENT_NAME)
@@ -35,7 +29,6 @@
 #     REPO_URL        clone URL of this repo (required)
 #     AWS_ACCOUNT_ID  exported to the agent env when set
 #     SSH_PUBLIC_KEY  authorizes one key for AGENT_USER (herdr --remote)
-#     EXTRA_UNIT_DEPS extra systemd units pi-agent.service requires, e.g. docker.service
 #     BUNDLE_S3_URI   S3 prefix of the fleet bundle (bundle.tar.gz + version).
 #                     When set, code comes from S3 instead of git and the
 #                     pi-coms-update convergence script is installed.
@@ -54,10 +47,11 @@ PI_PROVIDER="${PI_PROVIDER:-}"
 COMS_PROJECT="${COMS_PROJECT:-default}"
 AGENT_PURPOSE="${AGENT_PURPOSE:-Pi coms-net agent $AGENT_NAME}"
 SERVER_URL="${PI_COMS_NET_SERVER_URL:?PI_COMS_NET_SERVER_URL is required}"
-SECRETS_SOURCE="${SECRETS_SOURCE:?SECRETS_SOURCE is required (aws|file)}"
-EXTRA_UNIT_DEPS="${EXTRA_UNIT_DEPS:-}"
+COMS_TOKEN_PARAM="${COMS_TOKEN_PARAM:?COMS_TOKEN_PARAM is required}"
+PROVIDER_KEYS_PARAM="${PROVIDER_KEYS_PARAM:?PROVIDER_KEYS_PARAM is required}"
+AWS_REGION="${AWS_REGION:?AWS_REGION is required}"
 
-echo "=== pi agent bootstrap ($SECRETS_SOURCE) $(date -Is) ==="
+echo "=== pi agent bootstrap $(date -Is) ==="
 
 # ── Packages ───────────────────────────────────────────────────────────────
 if command -v dnf >/dev/null; then
@@ -136,15 +130,13 @@ BOOTSTRAP
 # bootstrap (observed on an OIT boot, 2026-08-31). Wait for the credential
 # chain before any aws call. sts:GetCallerIdentity needs no IAM grant.
 BUNDLE_S3_URI="${BUNDLE_S3_URI:-}"
-if [ -n "$BUNDLE_S3_URI" ] || [ "$SECRETS_SOURCE" = "aws" ]; then
-  command -v aws >/dev/null || { echo "aws cli not found" >&2; exit 1; }
-  for i in $(seq 1 10); do
-    aws sts get-caller-identity --region "${AWS_REGION:-us-east-1}" \
+command -v aws >/dev/null || { echo "aws cli not found" >&2; exit 1; }
+for i in $(seq 1 10); do
+    aws sts get-caller-identity --region "$AWS_REGION" \
       --query Account --output text >/dev/null 2>&1 && { echo "aws credentials ready after $i attempt(s)"; break; }
     [ "$i" -eq 10 ] && { echo "aws credentials unavailable after $i attempts (sts get-caller-identity kept failing)" >&2; exit 1; }
     sleep 3
-  done
-fi
+done
 
 # ── Project checkout ───────────────────────────────────────────────────────
 if [ -n "$BUNDLE_S3_URI" ]; then
@@ -183,47 +175,22 @@ fi
 # ── Secrets ────────────────────────────────────────────────────────────────
 # Resolved into a 0600 env file the agent sources. Values are never echoed.
 
-case "$SECRETS_SOURCE" in
-  aws)
-    : "${COMS_TOKEN_PARAM:?COMS_TOKEN_PARAM required for SECRETS_SOURCE=aws}"
-    : "${PROVIDER_KEYS_PARAM:?PROVIDER_KEYS_PARAM required for SECRETS_SOURCE=aws}"
-    : "${AWS_REGION:?AWS_REGION required for SECRETS_SOURCE=aws}"
-    command -v aws >/dev/null || { echo "aws cli not found" >&2; exit 1; }
+COMS_TOKEN="$(aws ssm get-parameter \
+  --name "$COMS_TOKEN_PARAM" --region "$AWS_REGION" \
+  --with-decryption --query Parameter.Value --output text)"
 
-    COMS_TOKEN="$(aws ssm get-parameter \
-      --name "$COMS_TOKEN_PARAM" --region "$AWS_REGION" \
-      --with-decryption --query Parameter.Value --output text)"
+# Provider keys may still be the "{}" placeholder on first boot; tolerate
+# that so the host still comes up and registers.
+PROVIDER_JSON="$(aws ssm get-parameter \
+  --name "$PROVIDER_KEYS_PARAM" --region "$AWS_REGION" \
+  --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '{}')"
 
-    # Provider keys may still be the "{}" placeholder on first boot; tolerate
-    # that so the host still comes up and registers.
-    PROVIDER_JSON="$(aws ssm get-parameter \
-      --name "$PROVIDER_KEYS_PARAM" --region "$AWS_REGION" \
-      --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '{}')"
-
-    PROVIDER_EXPORTS="$(echo "$PROVIDER_JSON" | python3 -c \
-      'import json,sys,shlex
+PROVIDER_EXPORTS="$(echo "$PROVIDER_JSON" | python3 -c \
+  'import json,sys,shlex
 try: d=json.load(sys.stdin)
 except Exception: d={}
 for k,v in d.items():
     print("export %s=%s" % (k, shlex.quote(str(v))))')"
-    ;;
-  file)
-    : "${COMS_TOKEN_ENV_FILE:?COMS_TOKEN_ENV_FILE required for SECRETS_SOURCE=file}"
-    : "${PROVIDER_KEYS_ENV_FILE:?PROVIDER_KEYS_ENV_FILE required for SECRETS_SOURCE=file}"
-
-    COMS_TOKEN="$(grep -E '^PI_COMS_NET_AUTH_TOKEN=' "$COMS_TOKEN_ENV_FILE" | cut -d= -f2-)"
-
-    PROVIDER_EXPORTS="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$PROVIDER_KEYS_ENV_FILE" 2>/dev/null \
-      | python3 -c 'import sys,shlex
-for line in sys.stdin:
-    k,_,v=line.rstrip("\n").partition("=")
-    print("export %s=%s" % (k, shlex.quote(v)))' || true)"
-    ;;
-  *)
-    echo "unknown SECRETS_SOURCE '$SECRETS_SOURCE' (expected aws|file)" >&2
-    exit 1
-    ;;
-esac
 
 [ -n "$COMS_TOKEN" ] || { echo "coms-net auth token is empty" >&2; exit 1; }
 
@@ -324,8 +291,8 @@ UNIT
 cat > /etc/systemd/system/pi-agent.service <<UNIT
 [Unit]
 Description=Pi coms-net agent ($AGENT_NAME)
-Requires=herdr.service $EXTRA_UNIT_DEPS
-After=herdr.service $EXTRA_UNIT_DEPS
+Requires=herdr.service
+After=herdr.service
 
 [Service]
 Type=oneshot

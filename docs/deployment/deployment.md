@@ -151,15 +151,13 @@ From an operator session, `ask monitor-<alias> for status` answers with its
 last run and unsent-report count without spending tokens on the monitor
 side; the daily digest in the `ops` inbox is the standing dead-man signal.
 
-## The deprecated VPS deployment
+## The retired VPS deployment
 
-The original hub ran in Docker behind Traefik on a Hostinger VPS
-(`deploy/hub/Dockerfile`, `deploy/hostinger/`), with a `devops` agent on the
-same host. That estate is DEPRECATED as of 2026-08-31: do not deploy to it.
-Two standing cautions while its pieces still exist: `/srv/pi-coms` on the
-VPS is a plain file copy inside another repo's checkout -- never run git
-there -- and hub deploys there were scp + `docker compose up -d --build`,
-not the S3 bundle flow.
+The original hub ran in Docker behind Traefik on a Hostinger VPS with a
+`devops` agent on the same host. That estate was retired on 2026-08-31 and
+its deployment files are gone from the repo (git history has them). Do not
+deploy to it. One caution while the host still exists: `/srv/pi-coms` there
+is a plain file copy inside another repo's checkout -- never run git there.
 
 ## See Also
 

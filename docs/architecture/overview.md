@@ -4,7 +4,7 @@ pi-coms gives Pi Coding Agent instances peer-to-peer messaging. Two equal agents
 
 The repository holds two layers:
 
-1. **Extensions** (`extensions/`) -- standalone TypeScript files loaded into Pi via `-e`, implementing the two transports and their tool surfaces.
+1. **Extensions** (`extensions/`) -- standalone TypeScript files loaded into Pi via `-e`: the networked client and its tool surface, plus small shared modules.
 2. **Deployment** (`deploy/`) -- a star topology: a zero-permission hub on a private EC2 host and one read-only Pi agent (plus its deterministic monitor) per AWS account.
 
 ```
@@ -17,7 +17,6 @@ eu-oit-dev ──────────────┘
 
 | Component | File | Role |
 |-----------|------|------|
-| Local transport | `extensions/coms.ts` | Same-machine peers over Unix sockets; file registry at `~/.pi/coms/` |
 | Networked client | `extensions/coms-net.ts` | HTTP + Server-Sent Events (SSE) client to a hub |
 | Hub | `scripts/coms-net-server.ts` | Bun HTTP server; in-memory registry, message relay, sqlite mailbox for store-and-forward |
 | Monitor | `scripts/coms-net-monitor.ts` + `scripts/monitor/` | Per-host AWS checks on `Bun.cron`; reports via the mailbox (see [Monitoring](monitoring.md)) |
@@ -34,18 +33,18 @@ eu-oit-dev ──────────────┘
 4. **Replies are automatic.** An inbound prompt triggers a normal Pi turn; the final assistant message of that turn is submitted back to the caller by the extension. Tools are never used to reply (see [Communication](communication.md)).
 5. **One shared bootstrap.** All install and launch logic lives in one script parameterized by `SECRETS_SOURCE=aws|file`; the AWS userdata and VPS shims only set environment.
 
-## The two transports
+## The transport
 
-| | `coms` (local) | `coms-net` (networked) |
-|---|---|---|
-| Transport | Unix sockets / named pipes | HTTP + SSE via the hub |
-| Registry | JSON files, `~/.pi/coms/projects/<project>/agents/` | Hub process memory |
-| Liveness | `process.kill(pid, 0)` + 10 s pings | 10 s heartbeats; hub marks stale at 30 s, evicts at 60 s |
-| Name collisions | Client appends a counter | Hub appends a counter; client adopts the assigned name |
-| Auth | OS file permissions (registry dir mode 0700) | Bearer token on every `/v1/*` request |
-| Tools | `coms_list/send/get/await` | `coms_net_list/send/get/await/broadcast` |
+| | `coms-net` |
+|---|---|
+| Transport | HTTP + SSE via the hub |
+| Registry | Hub process memory |
+| Liveness | 10 s heartbeats; hub marks stale at 30 s, evicts at 60 s |
+| Name collisions | Single-token hub appends a counter and the client adopts the assigned name (with a UI warning); directory mode refuses a held name with `409 name_taken` |
+| Auth | Bearer token on every `/v1/*` request |
+| Tools | `coms_net_list/send/get/await/broadcast/inbox` |
 
-Both extensions share the same shape: register an identity (`--cname`, `--purpose`, `--project`, `--color`), render a peer-pool widget below the editor, expose the tool surface, auto-reply on `agent_end`, and write an audit log that never contains prompt bodies.
+The extension registers an identity (`--cname`, `--purpose`, `--project`, `--color`), renders a peer-pool widget below the editor, exposes the tool surface, auto-replies on `agent_end`, and writes an audit log that never contains prompt bodies. Same-machine peers use the same client against a hub bound to `127.0.0.1` (`just coms-net-server`).
 
 ## A message end to end
 

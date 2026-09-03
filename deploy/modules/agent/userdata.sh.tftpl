@@ -21,7 +21,6 @@ else
   git clone --depth 1 '${repo_url}' /opt/pi-bootstrap
 fi
 
-export SECRETS_SOURCE=aws
 export COMS_TOKEN_PARAM='${token_param_name}'
 export PROVIDER_KEYS_PARAM='${keys_param_name}'
 export BUNDLE_S3_URI='${bundle_s3_uri}'

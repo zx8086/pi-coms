@@ -3,13 +3,9 @@ set dotenv-load := true
 default:
     @just --list
 
-# Plain Pi with the minimal footer + theme cycler
+# Plain Pi with the minimal footer
 pi:
     pi -e extensions/minimal.ts
-
-# Coms: peer-to-peer, same-machine messaging between Pi agents
-local-coms *args:
-    pi -e extensions/coms.ts {{args}}
 
 # Start a local coms-net server (binds 127.0.0.1, OS-claimed port)
 # Auto-kills any stale process holding the pinned port first.
