@@ -71,6 +71,7 @@ export function parseDiagnoses(raw: unknown): Map<string, Diagnosis> | null {
 }
 
 const SEV_ORDER: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };
+const NOTABLE_CAP = 10;
 
 export function formatIncidentReport(
 	accountId: string,
@@ -102,6 +103,38 @@ export function formatIncidentReport(
 	return lines.join("\n");
 }
 
+export type DigestNotable = {
+	severity: Severity;
+	family: Family;
+	resource: string;
+	summary: string;
+	uninvestigated: boolean;
+};
+
+// A journaled finding row carries the finding plus the diagnosis it was (or
+// wasn't) investigated with; a null diagnosis at warn+ is itself a signal.
+export function notablesFromJournal(rows: { payload: string }[]): DigestNotable[] {
+	const notables: DigestNotable[] = [];
+	for (const r of rows) {
+		let payload: unknown;
+		try {
+			payload = JSON.parse(r.payload);
+		} catch {
+			continue;
+		}
+		const parsed = FindingSchema.safeParse(payload);
+		if (!parsed.success || parsed.data.severity === "info") continue;
+		notables.push({
+			severity: parsed.data.severity,
+			family: parsed.data.family,
+			resource: parsed.data.resource,
+			summary: parsed.data.summary,
+			uninvestigated: (payload as { diagnosis?: unknown }).diagnosis == null,
+		});
+	}
+	return notables;
+}
+
 export type DigestInput = {
 	accountId: string;
 	since: string;
@@ -113,6 +146,7 @@ export type DigestInput = {
 	baselineUsd: number | null;
 	bundleVersion?: string | null;
 	suppressedCount?: number;
+	notables?: DigestNotable[];
 };
 
 export function formatDigest(d: DigestInput): string {
@@ -129,6 +163,23 @@ export function formatDigest(d: DigestInput): string {
 	} else {
 		const parts = Object.entries(d.findingCounts).map(([k, v]) => `${k}=${v}`).join(" ");
 		lines.push(`- findings: ${total} (${parts})`);
+	}
+	// Counts alone hide what actually needs follow-up: name every warn+
+	// finding so the digest is reviewable without a journal round-trip.
+	const notables = (d.notables ?? [])
+		.filter((n) => n.severity !== "info")
+		.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
+	if (notables.length > 0) {
+		lines.push("- notable warn+ findings (last 24h):");
+		for (const n of notables.slice(0, NOTABLE_CAP)) {
+			const marker = n.uninvestigated ? " [uninvestigated]" : "";
+			lines.push(`  - (${n.severity}/${n.family}) ${n.resource}: ${n.summary}${marker}`);
+		}
+		if (notables.length > NOTABLE_CAP) {
+			lines.push(`  - +${notables.length - NOTABLE_CAP} more warn+ finding(s) in the journal`);
+		}
+		const uninvestigated = notables.filter((n) => n.uninvestigated).length;
+		if (uninvestigated > 0) lines.push(`- uninvestigated: ${uninvestigated}`);
 	}
 	// DEGRADED must be self-explanatory from the mailbox: name the failing
 	// family, not just the count.

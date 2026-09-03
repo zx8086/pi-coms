@@ -106,7 +106,7 @@ Findings of severity warn or critical go to the account's Pi agent (`aws-<accoun
 Both report kinds go to `PI_MONITOR_REPORT_TO` (code default `laptop`; the bootstrap sets `ops` on deployed hosts) with a long TTL, so they wait in the hub mailbox when the operator is offline:
 
 1. **Incident report** whenever a run has findings: severity-first summary, per-finding diagnosis and evidence. Recoveries ship as info.
-2. **Daily digest** even when quiet: 24 h finding counts, check errors broken down by check family, current ALARM states, spend vs baseline, suppressed-finding count, and the deployed bundle version (the deploy canary: a stale bundle is visible without an SSM round-trip). When any check family errored in the window the header flags `DEGRADED` at `[warn]` -- a green digest produced over broken checks would be a lie. A missing digest is itself the monitor's dead-man signal.
+2. **Daily digest** even when quiet: 24 h finding counts, each warn/critical finding of the window named on its own line (capped at 10, `[uninvestigated]`-tagged where the diagnosis failed, with an uninvestigated total -- counts alone hide what needs follow-up), check errors broken down by check family, current ALARM states, spend vs baseline, suppressed-finding count, and the deployed bundle version (the deploy canary: a stale bundle is visible without an SSM round-trip). When any check family errored in the window the header flags `DEGRADED` at `[warn]` -- a green digest produced over broken checks would be a lie. A missing digest is itself the monitor's dead-man signal.
 
 If the hub is unreachable at report time, the report is queued in `state.db` and retried on the next tick -- the mailbox covers the offline-recipient half, this covers the offline-hub half.
 

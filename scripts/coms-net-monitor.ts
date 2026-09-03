@@ -33,6 +33,7 @@ import {
 	type Finding,
 	formatDigest,
 	formatIncidentReport,
+	notablesFromJournal,
 	parseDiagnoses,
 } from "./monitor/report.ts";
 import { MonitorState } from "./monitor/state.ts";
@@ -361,6 +362,7 @@ function main(): void {
 			baselineUsd: latest ? state.costBaseline(latest.date, 14) : null,
 			bundleVersion: await bundleVersion(),
 			suppressedCount: state.journalRows(day, "suppressed_finding").length,
+			notables: notablesFromJournal(findingRows),
 		});
 	};
 
