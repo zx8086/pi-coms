@@ -7,6 +7,15 @@ export interface TurnReplyInbound {
 	fulfilled: boolean;
 }
 
+// Hop count for a new outbound send: one past the deepest unfulfilled inbound
+// the current turn is answering, 0 when the turn was started by the user. A
+// single "current inbound" slot got this wrong once prompts stacked (SIO-1611).
+export function outboundHops(queue: Iterable<{ hops: number; fulfilled: boolean }>): number {
+	let max = -1;
+	for (const q of queue) if (!q.fulfilled && q.hops > max) max = q.hops;
+	return max + 1;
+}
+
 export interface TurnReply {
 	msg_id: string;
 	response: unknown;
