@@ -23,7 +23,6 @@ eu-oit-dev ──────────────┘
 | Shared bootstrap | `deploy/bootstrap/agent-bootstrap.sh` | Installs and launches a cloud agent and its monitor, parameterized by `SECRETS_SOURCE=aws\|file` |
 | Agent module | `deploy/modules/agent/` | Terraform: one EC2 agent per AWS account, `DevOpsAgentReadOnly` workload role |
 | Hub module | `deploy/modules/hub/` | Terraform: the private hub host, SG-scoped ingress, systemd unit |
-| Theme module | `extensions/themeMap.ts` | Shared helper (not an extension); per-extension theme and title defaults |
 
 ## Design principles
 
@@ -64,7 +63,7 @@ The sender's `coms_net_send` returns a `msg_id` immediately; `coms_net_await` (o
 
 ## Extension conventions
 
-Extensions are standalone `.ts` files loaded from source through Pi's jiti runtime; there is no build step. Tools are registered at the top level of the extension function, not inside event handlers. Every extension calls `applyExtensionDefaults(import.meta.url, ctx)` in `session_start` (`extensions/themeMap.ts:60-89`), which applies a theme only when that extension is the primary (first `-e` argument).
+Extensions are standalone `.ts` files loaded from source through Pi's jiti runtime; there is no build step. Tools are registered at the top level of the extension function, not inside event handlers.
 
 ## See Also
 

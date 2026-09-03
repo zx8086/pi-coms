@@ -442,7 +442,6 @@ fi
 
 herdr agent start "AGENT_NAME_PLACEHOLDER" --kind pi --pane "$PANE_ID" --timeout 15000 -- \
   -e extensions/coms-net.ts \
-  -e extensions/minimal.ts \
   --model "PI_MODEL_PLACEHOLDER" \
   "${PROVIDER_ARGS[@]}" \
   --cname "AGENT_NAME_PLACEHOLDER" \
