@@ -14,10 +14,11 @@ Pi does not auto-load `.env`; the `just` recipes do (`set dotenv-load`). Running
 
 ## Naming
 
-The agent name flag is `--cname`; Pi owns `--name` and resumes it across sessions. Pass both so the Pi session and the coms identity match:
+The agent name flag is `--cname`; Pi owns `--name` and resumes it across sessions. The `just coms` recipe sets both from one value: the Pi session is named `<name> <timestamp>` so each run is traceable in Pi's session list, the coms identity is `<name>`, and `--explicit` keeps the operator out of peer auto-discovery. Extra args pass through to Pi.
 
 ```bash
-just coms --name dev --cname dev
+just coms dev
+just coms dev --model claude-opus-4-7
 ```
 
 If the chosen name is already held by a live session, the hub assigns `name2` and the client adopts it -- check the widget or `coms_net_list` for the name you actually got. Peers address each other by exact name.
@@ -37,7 +38,7 @@ aws ssm start-session --profile eu-shared-services-dev --region eu-central-1 \
 # terminal 2 -- the client
 export PI_COMS_NET_SERVER_URL=http://127.0.0.1:8787
 export PI_COMS_NET_AUTH_TOKEN=<your personal token>
-just coms --name <you> --cname <you>
+just coms <you>
 ```
 
 The hub instance id changes when the instance is replaced; find the current
