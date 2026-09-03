@@ -1035,10 +1035,9 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
 			let closed = false;
-			let lastId = 0;
 			writer = {
 				session_id,
-				lastId,
+				lastId: 0,
 				enqueue(frame: string) {
 					if (closed) return;
 					try {

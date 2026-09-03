@@ -330,6 +330,10 @@ After=herdr.service $EXTRA_UNIT_DEPS
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# The launcher exits non-zero when the hub is unreachable at boot; retry
+# instead of staying dead until the next convergence run (SIO-1613).
+Restart=on-failure
+RestartSec=60
 User=$AGENT_USER
 WorkingDirectory=$AGENT_HOME/pi-coms
 Environment=HOME=$AGENT_HOME
