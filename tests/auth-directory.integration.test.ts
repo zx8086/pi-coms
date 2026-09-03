@@ -14,6 +14,7 @@ afterEach(async () => {
 const SIMON_TOKEN = "token-simon-0000000000000000";
 const JANE_TOKEN = "token-jane-11111111111111111";
 const AGENT_TOKEN = "token-agent-2222222222222222";
+const KIM_TOKEN = "token-kim-333333333333333333";
 
 function writeDirectory(file: string): void {
 	fs.writeFileSync(file, JSON.stringify({
@@ -21,6 +22,7 @@ function writeDirectory(file: string): void {
 			simon: { token: SIMON_TOKEN, kind: "operator", names: ["simon", "ops"] },
 			jane: { token: JANE_TOKEN, kind: "operator", names: ["jane", "ops"] },
 			"eu-oit-dev": { token: AGENT_TOKEN, kind: "agent", names: ["eu-oit-dev", "monitor-eu-oit-dev"] },
+			kim: { token: KIM_TOKEN, kind: "operator", names: ["kim"] },
 		},
 	}));
 }
@@ -110,5 +112,75 @@ describe("directory auth", () => {
 		const agents = ((await list.json()) as any).agents;
 		expect(agents.some((a: any) => a.name === "simon")).toBe(false);
 		await resp.body?.cancel();
+	});
+
+	test("session ownership: another principal cannot heartbeat, delete, or open SSE for a session; root can", async () => {
+		const { hub } = await startDirectoryHub();
+		const sseUrl = await register(hub, "S1", "simon", SIMON_TOKEN);
+		await register(hub, "J1", "jane", JANE_TOKEN);
+
+		const hb = { project: "default", context_used_pct: 1, queue_depth: 0 };
+		expect((await api(hub, "POST", "/v1/agents/S1/heartbeat", hb, JANE_TOKEN)).status).toBe(403);
+		expect((await api(hub, "DELETE", "/v1/agents/S1?project=default", undefined, JANE_TOKEN)).status).toBe(403);
+		const foreignSse = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${JANE_TOKEN}` } });
+		expect(foreignSse.status).toBe(403);
+
+		expect((await api(hub, "POST", "/v1/agents/S1/heartbeat", hb, SIMON_TOKEN)).status).toBe(200);
+		expect((await api(hub, "POST", "/v1/agents/S1/heartbeat", hb, TOKEN)).status).toBe(200);
+		const ownSse = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${SIMON_TOKEN}` } });
+		expect(ownSse.status).toBe(200);
+		await ownSse.body?.cancel();
+		expect((await api(hub, "DELETE", "/v1/agents/S1?project=default", undefined, TOKEN)).status).toBe(200);
+	});
+
+	test("a spoofed sender_session is 403", async () => {
+		const { hub } = await startDirectoryHub();
+		await register(hub, "S1", "simon", SIMON_TOKEN);
+		await register(hub, "J1", "jane", JANE_TOKEN);
+		const body = (sender: string) => ({
+			project: "default", sender_session: sender, target: "simon", target_session: null,
+			prompt: "hi", conversation_id: null, response_schema: null, hops: 0, ttl_ms: 60_000,
+		});
+		expect((await api(hub, "POST", "/v1/messages", body("S1"), JANE_TOKEN)).status).toBe(403);
+		expect((await api(hub, "POST", "/v1/messages", body("J1"), JANE_TOKEN)).status).toBe(200);
+	});
+
+	test("only the principal holding the target session may answer a message", async () => {
+		const { hub } = await startDirectoryHub();
+		await register(hub, "OP", "simon", SIMON_TOKEN);
+		const sseUrl = await register(hub, "AG", "eu-oit-dev", AGENT_TOKEN);
+		const resp = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${AGENT_TOKEN}` } });
+		await readSseEvents(resp, "hello", 1);
+		const s = await api(hub, "POST", "/v1/messages", {
+			project: "default", sender_session: "OP", target: "eu-oit-dev", target_session: null,
+			prompt: "question", conversation_id: null, response_schema: null, hops: 0,
+		}, SIMON_TOKEN);
+		expect(s.status).toBe(200);
+		const msg_id = ((await s.json()) as any).msg_id as string;
+		await readSseEvents(resp, "prompt", 1);
+
+		const answer = { responder_session: "AG", response: "forged", error: null };
+		expect((await api(hub, "POST", `/v1/messages/${msg_id}/response`, answer, JANE_TOKEN)).status).toBe(403);
+		expect((await api(hub, "POST", `/v1/messages/${msg_id}/response`, answer, AGENT_TOKEN)).status).toBe(200);
+		await resp.body?.cancel();
+	});
+
+	test("shared inbox: a principal without the ops name still reads the ops history", async () => {
+		const { hub } = await startDirectoryHub();
+		await register(hub, "AG", "eu-oit-dev", AGENT_TOKEN);
+		const s = await api(hub, "POST", "/v1/messages", {
+			project: "default", sender_session: "AG", target: "ops", target_session: null,
+			prompt: "nightly digest", conversation_id: null, response_schema: null, hops: 0,
+			ttl_ms: 3_600_000,
+		}, AGENT_TOKEN);
+		expect(s.status).toBe(200);
+
+		const kim = await api(hub, "GET", "/v1/mailbox?project=default&name=ops", undefined, KIM_TOKEN);
+		expect(kim.status).toBe(200);
+		const kimMsgs = ((await kim.json()) as any).messages;
+		expect(kimMsgs.map((m: any) => m.prompt)).toEqual(["nightly digest"]);
+
+		const simon = await api(hub, "GET", "/v1/mailbox?project=default&name=ops", undefined, SIMON_TOKEN);
+		expect(((await simon.json()) as any).messages.map((m: any) => m.msg_id)).toEqual(kimMsgs.map((m: any) => m.msg_id));
 	});
 });

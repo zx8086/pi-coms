@@ -131,7 +131,7 @@ Agents accept natural-language prompts from any peer holding the token, and inbo
 3. The inbox cap (100) and message TTL bound queue-stuffing. Mailbox sends stretch the TTL to 14 days, and a send to an offline name is not counted by the inbox cap (the cap counts messages per live session, and there is none yet) -- for offline names the bound is the TTL sweep plus the single-token perimeter. Durability extends the window, not the audience: any token holder could already send at will.
 4. The audit trail records who messaged whom, without retaining payloads that might themselves be sensitive.
 
-In single-token mode there is no per-peer authorization: any token holder can prompt any agent. Directory mode (above) adds identity, name binding, and per-principal revocation; message-level authorization (who may prompt whom, who may read which inbox) remains open -- genuinely separate trust domains still belong on separate hubs.
+In single-token mode there is no per-peer authorization: any token holder can prompt any agent. Directory mode (above) adds identity, name binding, per-principal revocation, and session ownership: only the principal that registered a session may open its SSE stream, heartbeat for it, delete it, send as it, or answer messages delivered to it (root and `*` principals act on every session). Who may prompt whom, and inbox reads, remain open to every authenticated principal by design: the shared inbox is the same history for every operator. Genuinely separate trust domains still belong on separate hubs. Request bodies above `PI_COMS_NET_MAX_BODY_BYTES` (default 1 MiB) are rejected with 413, and project names are restricted to plain directory names.
 
 ## Operational rules
 
