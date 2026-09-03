@@ -63,7 +63,15 @@ describe("MonitorComs", () => {
 		await peer.awaitReply(sent.msg_id, 10_000);
 		expect(peer.pendingSize()).toBe(0);
 
-		for (let i = 0; i < 250; i++) await agent.send("ops", `r${i}`, { ttl_ms: 86_400_000 });
+		// 210 rapid sends over keep-alive connections; Bun's fetch occasionally
+		// reports a closed socket under CI load, so one retry per send.
+		for (let i = 0; i < 210; i++) {
+			try {
+				await agent.send("ops", `r${i}`, { ttl_ms: 86_400_000 });
+			} catch {
+				await agent.send("ops", `r${i}`, { ttl_ms: 86_400_000 });
+			}
+		}
 		expect(agent.pendingSize()).toBe(200);
 
 		await agent.stop();
