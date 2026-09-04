@@ -1,15 +1,17 @@
 // tests/checks-certs.test.ts
 import { describe, expect, test } from "bun:test";
-import { ListCertificatesCommand } from "@aws-sdk/client-acm";
+import { type DescribeCertificateCommand, ListCertificatesCommand } from "@aws-sdk/client-acm";
 import { certRegions, checkCerts } from "../scripts/monitor/checks/certs.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 const NOW = Date.parse("2026-09-01T12:00:00Z");
 const DAY = 86_400_000;
 
+type CertEvidence = { arn: string; region: string; supersededBy?: { arn: string } };
+
 function fakeClient(certs: { arn: string; domain: string; daysLeft: number; sans?: string[] }[]) {
 	return {
-		send: async (cmd: any) => {
+		send: async (cmd: ListCertificatesCommand | DescribeCertificateCommand) => {
 			if (cmd instanceof ListCertificatesCommand) {
 				return { CertificateSummaryList: certs.map((c) => ({ CertificateArn: c.arn })) };
 			}
@@ -94,7 +96,7 @@ describe("checkCerts supersession", () => {
 		expect(out).toHaveLength(1);
 		expect(out[0].severity).toBe("info");
 		expect(out[0].summary).toContain("superseded");
-		expect((out[0].evidence as any).supersededBy.arn).toBe("arn:cert/new");
+		expect((out[0].evidence as CertEvidence).supersededBy?.arn).toBe("arn:cert/new");
 	});
 
 	test("stays critical when the only other same-domain cert is also expired", async () => {
@@ -137,7 +139,7 @@ describe("checkCerts supersession", () => {
 		);
 		expect(out).toHaveLength(1);
 		expect(out[0].severity).toBe("info");
-		expect((out[0].evidence as any).supersededBy.arn).toBe("arn:cert/wild");
+		expect((out[0].evidence as CertEvidence).supersededBy?.arn).toBe("arn:cert/wild");
 	});
 
 	test("SAN coverage counts as supersession", async () => {
@@ -183,9 +185,9 @@ describe("checkCerts multi-region", () => {
 			{ now: NOW },
 		);
 		expect(out).toHaveLength(2);
-		const byArn = new Map(out.map((f) => [(f.evidence as any).arn, f]));
-		expect((byArn.get("arn:eu/a")?.evidence as any).region).toBe("eu-central-1");
-		expect((byArn.get("arn:us/b")?.evidence as any).region).toBe("us-east-1");
+		const byArn = new Map(out.map((f) => [(f.evidence as CertEvidence).arn, f]));
+		expect((byArn.get("arn:eu/a")?.evidence as CertEvidence).region).toBe("eu-central-1");
+		expect((byArn.get("arn:us/b")?.evidence as CertEvidence).region).toBe("us-east-1");
 		expect(byArn.get("arn:us/b")?.summary).toContain("us-east-1");
 	});
 
@@ -206,7 +208,7 @@ describe("checkCerts multi-region", () => {
 		const scope = out.find((f) => f.severity === "info");
 		expect(scope?.summary).toContain("us-east-1");
 		expect(scope?.summary).toContain("not inspected");
-		expect(out.find((f) => (f.evidence as any).arn === "arn:eu/a")?.severity).toBe("critical");
+		expect(out.find((f) => (f.evidence as CertEvidence).arn === "arn:eu/a")?.severity).toBe("critical");
 		// scoping finding reports once, not per run
 		expect((await run()).filter((f) => f.severity === "info")).toHaveLength(0);
 	});

@@ -4,7 +4,17 @@
 // the hub fails each pending msg_id with error "target_died" so senders'
 // awaits resolve immediately instead of hanging until timeout.
 import { afterEach, expect, test } from "bun:test";
-import { api, readSseEvents, register, send, startHub, stopAllHubs, TOKEN } from "./harness";
+import {
+	api,
+	type MessageLookup,
+	readSseEvents,
+	register,
+	type SendResponse,
+	send,
+	startHub,
+	stopAllHubs,
+	TOKEN,
+} from "./harness";
 
 afterEach(async () => {
 	await stopAllHubs();
@@ -25,7 +35,7 @@ test("shutdown of the target fails its delivered messages with target_died", asy
 
 	const r = await send(hub, "sess-a", "bob", "long investigation");
 	expect(r.status).toBe(200);
-	const { msg_id } = (await r.json()) as any;
+	const { msg_id } = (await r.json()) as SendResponse;
 	// Bob received the prompt (message is "delivered").
 	const prompts = await readSseEvents(sseB, "prompt", 1);
 	expect(prompts.length).toBe(1);
@@ -44,7 +54,7 @@ test("shutdown of the target fails its delivered messages with target_died", asy
 
 	// The stored message is terminal too.
 	const g = await api(hub, "GET", `/v1/messages/${msg_id}`);
-	const got = (await g.json()) as any;
+	const got = (await g.json()) as MessageLookup;
 	expect(got.status).toBe("error");
 	expect(got.error).toBe("target_died");
 }, 15_000);
@@ -55,7 +65,7 @@ test("a pending hub-side await resolves with target_died instead of hanging", as
 	const sseB = await openSse(hub, await register(hub, "sess-b", "bob"));
 
 	const r = await send(hub, "sess-a", "bob", "another question");
-	const { msg_id } = (await r.json()) as any;
+	const { msg_id } = (await r.json()) as SendResponse;
 	await readSseEvents(sseB, "prompt", 1);
 
 	const t0 = Date.now();
@@ -63,7 +73,7 @@ test("a pending hub-side await resolves with target_died instead of hanging", as
 	await Bun.sleep(100); // let the awaiter attach
 	await api(hub, "DELETE", "/v1/agents/sess-b?project=default");
 
-	const res = (await (await awaitP).json()) as any;
+	const res = (await (await awaitP).json()) as MessageLookup;
 	expect(res.status).toBe("error");
 	expect(res.error).toBe("target_died");
 	expect(Date.now() - t0).toBeLessThan(5_000);
@@ -78,7 +88,7 @@ test("stale eviction of the target fails its delivered messages", async () => {
 	const sseB = await openSse(hub, await register(hub, "sess-b", "bob"));
 
 	const r = await send(hub, "sess-a", "bob", "heavy turn");
-	const { msg_id } = (await r.json()) as any;
+	const { msg_id } = (await r.json()) as SendResponse;
 	await readSseEvents(sseB, "prompt", 1);
 
 	// Keep alice fresh while bob goes silent and gets evicted by the stale scan
@@ -109,7 +119,7 @@ test("queued (undelivered) mailbox mail is untouched by another agent's death", 
 	// Mailbox-class send to an offline name: queues instead of failing.
 	const r = await send(hub, "sess-a", "ghost", "for later", 3_600_000);
 	expect(r.status).toBe(200);
-	const { msg_id, status } = (await r.json()) as any;
+	const { msg_id, status } = (await r.json()) as SendResponse;
 	expect(status).toBe("queued");
 
 	// An unrelated agent dying must not fail queued mail, and with no delivered
@@ -119,7 +129,7 @@ test("queued (undelivered) mailbox mail is untouched by another agent's death", 
 	expect(spurious.length).toBe(0);
 
 	const g = await api(hub, "GET", `/v1/messages/${msg_id}`);
-	expect(((await g.json()) as any).status).toBe("queued");
+	expect(((await g.json()) as MessageLookup).status).toBe("queued");
 
 	// The queued message still flushes when the name finally connects.
 	const sseG = await openSse(hub, await register(hub, "sess-g", "ghost"));

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { api, register, stopAllHubs, startHub, TOKEN } from "./harness.ts";
+import { api, type ErrorResponse, type InboxListing, register, startHub, stopAllHubs, TOKEN } from "./harness.ts";
 
 afterEach(async () => {
 	await stopAllHubs();
@@ -20,7 +20,7 @@ describe("hub request validation", () => {
 			model: "t", color: "#888888", cwd: "/tmp", explicit: false,
 		});
 		expect(r.status).toBe(400);
-		expect(((await r.json()) as any).error).toBe("invalid_project");
+		expect(((await r.json()) as ErrorResponse).error).toBe("invalid_project");
 		expect(fs.existsSync(path.join(hub.home, ".pi", "coms-net", "evil"))).toBe(false);
 		expect((await api(hub, "GET", "/v1/mailbox?project=..&name=ops")).status).toBe(400);
 	});
@@ -29,7 +29,7 @@ describe("hub request validation", () => {
 		const hub = await startHub();
 		const r = await api(hub, "GET", "/v1/mailbox?project=nope&name=ops");
 		expect(r.status).toBe(200);
-		expect(((await r.json()) as any).messages).toEqual([]);
+		expect(((await r.json()) as InboxListing).messages).toEqual([]);
 		expect(fs.existsSync(path.join(hub.home, ".pi", "coms-net", "projects", "nope"))).toBe(false);
 	});
 

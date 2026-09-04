@@ -1,5 +1,5 @@
 // scripts/monitor/checks/cost.ts
-import { GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
+import { GetCostAndUsageCommand, type GetCostAndUsageCommandOutput } from "@aws-sdk/client-cost-explorer";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -15,13 +15,13 @@ export async function checkCost(
 
 	const end = now.toISOString().slice(0, 10); // exclusive
 	const start = new Date(now.getTime() - 15 * 86_400_000).toISOString().slice(0, 10);
-	const resp = await client.send(
+	const resp = (await client.send(
 		new GetCostAndUsageCommand({
 			TimePeriod: { Start: start, End: end },
 			Granularity: "DAILY",
 			Metrics: ["UnblendedCost"],
 		}),
-	);
+	)) as GetCostAndUsageCommandOutput;
 
 	for (const r of resp.ResultsByTime ?? []) {
 		const date = r.TimePeriod?.Start;

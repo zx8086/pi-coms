@@ -1,5 +1,5 @@
 // scripts/monitor/checks/ingestion.ts
-import { GetMetricDataCommand } from "@aws-sdk/client-cloudwatch";
+import { GetMetricDataCommand, type GetMetricDataCommandOutput } from "@aws-sdk/client-cloudwatch";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -41,14 +41,14 @@ export async function checkIngestion(
 	const series = new Map<string, Map<number, number>>();
 	let nextToken: string | undefined;
 	do {
-		const resp: any = await client.send(
+		const resp = (await client.send(
 			new GetMetricDataCommand({
 				MetricDataQueries: [{ Id: "ingest", Expression: EXPRESSION, Period: 3600 }],
 				StartTime: new Date(startMs),
 				EndTime: new Date(endMs),
 				NextToken: nextToken,
 			}),
-		);
+		)) as GetMetricDataCommandOutput;
 		for (const r of resp.MetricDataResults ?? []) {
 			const group: string = r.Label ?? "";
 			if (!group || excludePrefixes.some((p) => group.startsWith(p))) continue;

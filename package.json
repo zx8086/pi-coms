@@ -5,7 +5,10 @@
   "description": "Peer-to-peer communication for Pi Coding Agent instances, with multi-account AWS deployment",
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "biome:check": "biome check .",
+    "biome:check:write": "biome check --write .",
+    "yaml:check": "yamllint -d relaxed .github/"
   },
   "dependencies": {
     "@aws-sdk/client-acm": "^3.1123.0",
@@ -20,6 +23,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
     "@types/bun": "latest",
     "typescript": "^5"
   }

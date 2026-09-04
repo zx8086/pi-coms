@@ -6,6 +6,51 @@ import { expect } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type {
+	AgentCard,
+	ErrorResponse,
+	MailStore,
+	MessageStatus,
+	RegisterResponse,
+	SendResponse,
+} from "../scripts/coms-net-server.ts";
+
+export type { ErrorResponse, RegisterResponse, SendResponse };
+
+// Response bodies as the hub builds them (scripts/coms-net-server.ts).
+export type AgentListing = { agents: AgentCard[] };
+export type InboxMessage = ReturnType<MailStore["inbox"]>[number];
+export type InboxListing = { ok: true; name: string; messages: InboxMessage[] };
+export type MessageLookup = { msg_id: string; status: MessageStatus; response: unknown; error: string | null };
+
+// SSE event payloads by event name.
+export type PromptEvent = {
+	msg_id: string;
+	project: string;
+	sender: { session_id: string; name: string; cwd: string };
+	prompt: string;
+	conversation_id: string | null;
+	response_schema: object | null;
+	hops: number;
+	mailbox: boolean;
+};
+export type ResponseEvent = {
+	msg_id: string;
+	project: string;
+	responder: { session_id: string; name: string };
+	response: unknown;
+	error: string | null;
+	status: MessageStatus;
+	reason?: string;
+};
+export type HelloEvent = { server_time: string; server_id: string };
+export type AgentLeftEvent = { project: string; session_id: string; name: string; reason: string };
+export type SseEvents = {
+	prompt: PromptEvent;
+	response: ResponseEvent;
+	hello: HelloEvent;
+	agent_left: AgentLeftEvent;
+};
 
 export const TOKEN = "test-token-mailbox";
 const SERVER = path.join(import.meta.dir, "..", "scripts", "coms-net-server.ts");
@@ -95,7 +140,7 @@ export async function register(
 		explicit: false,
 	}, token);
 	expect(r.status).toBe(200);
-	return ((await r.json()) as any).sse_url as string;
+	return ((await r.json()) as RegisterResponse).sse_url;
 }
 
 export function send(hub: Hub, sender: string, target: string, prompt: string, ttl_ms?: number) {
@@ -112,16 +157,16 @@ export function send(hub: Hub, sender: string, target: string, prompt: string, t
 	});
 }
 
-export async function readSseEvents(
+export async function readSseEvents<E extends keyof SseEvents>(
 	resp: Response,
-	wanted: string,
+	wanted: E,
 	count: number,
 	timeoutMs = 5_000,
-): Promise<any[]> {
+): Promise<SseEvents[E][]> {
 	const reader = resp.body!.getReader();
 	const dec = new TextDecoder();
 	let buf = "";
-	const out: any[] = [];
+	const out: SseEvents[E][] = [];
 	const deadline = Date.now() + timeoutMs;
 	while (out.length < count && Date.now() < deadline) {
 		const { done, value } = await Promise.race([

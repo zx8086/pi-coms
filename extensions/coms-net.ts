@@ -12,19 +12,19 @@
 //   pi -e extensions/coms-net.ts                       # auto-discover local server.json
 //   pi -e extensions/coms-net.ts --server-url http://host:port --auth-token <tok> --cname planner
 
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { claimTurnReplies, lastAssistantText, outboundHops } from "./turnReply.ts";
-import { makeSseParser } from "./sseParser.ts";
-import { reconnectDelay } from "./reconnectBackoff.ts";
 import { buildIdentityNote } from "./identityNote.ts";
 import { formatInbox } from "./inboxFormat.ts";
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
-import * as crypto from "node:crypto";
+import { reconnectDelay } from "./reconnectBackoff.ts";
+import { makeSseParser } from "./sseParser.ts";
+import { claimTurnReplies, lastAssistantText, outboundHops } from "./turnReply.ts";
 
 // ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -117,7 +117,7 @@ interface SendResponse {
 interface ResponseSubmitRequest {
 	project: string;
 	responder_session: string;
-	response: any;
+	response: unknown;
 	error: string | null;
 }
 
@@ -131,7 +131,7 @@ interface InboundContext {
 	fulfilled: boolean;
 }
 
-type ReplyResult = { response?: any; error?: string | null };
+type ReplyResult = { response?: unknown; error?: string | null };
 
 interface PendingReply {
 	resolve: (value: ReplyResult) => void;
@@ -157,13 +157,98 @@ interface ServerSecretJson {
 	token: string;
 }
 
+interface AgentsResponse {
+	agents?: AgentCard[];
+}
+
+interface HealthResponse {
+	version?: string;
+	server_id?: string;
+}
+
+interface MessageStatusResponse {
+	status?: MessageStatus | "pending";
+	response?: unknown;
+	error?: string | null;
+}
+
+interface MailboxMessage {
+	msg_id: string;
+	sender_name: string;
+	target_name: string | null;
+	prompt: string;
+	status: string;
+	error: string | null;
+	response: unknown;
+	created_at: string;
+	delivered_at: string | null;
+	completed_at: string | null;
+}
+
+interface MailboxResponse {
+	messages?: MailboxMessage[];
+}
+
+// Tool result `details` shapes, cast back in each renderResult.
+
+interface ListDetails {
+	agents: AgentCard[];
+	project: string;
+}
+
+interface SendDetails {
+	msg_id: string;
+	target: string;
+	target_session: string | null;
+	status: MessageStatus;
+	hops: number;
+}
+
+interface GetDetails {
+	status: string;
+	response: unknown;
+	error: string | null;
+}
+
+interface InboxDetails {
+	name: string;
+	count: number;
+	messages: MailboxMessage[];
+}
+
+interface AwaitDetails {
+	response: unknown;
+	error: string | null;
+}
+
+interface BroadcastResult {
+	target: string;
+	msg_id: string | null;
+	response: unknown;
+	error: string | null;
+}
+
+interface BroadcastDetails {
+	results: BroadcastResult[];
+	hops: number;
+	replied: number;
+	total: number;
+}
+
 class HttpError extends Error {
 	status: number;
-	body: any;
-	constructor(status: number, body: any, message?: string) {
+	body: unknown;
+	constructor(status: number, body: unknown, message?: string) {
 		super(message ?? `HTTP ${status}`);
 		this.status = status;
 		this.body = body;
+	}
+	// The hub answers errors with `{ error: string }`; a text or empty body
+	// falls back to the HTTP status message.
+	detail(): string {
+		const b = this.body;
+		const e = b && typeof b === "object" && "error" in b ? b.error : undefined;
+		return e ? String(e) : this.message;
 	}
 }
 
@@ -192,6 +277,10 @@ function ulid(): string {
 		}
 	}
 	return (timeStr + randStr).slice(0, 26);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null;
 }
 
 function hexFg(hex: string, s: string): string {
@@ -444,7 +533,7 @@ export default function (pi: ExtensionAPI) {
 
 	// ━━ HTTP helper ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-	async function httpFetch(method: string, urlPath: string, body?: any, opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<any> {
+	async function httpFetch<T = unknown>(method: string, urlPath: string, body?: unknown, opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<T> {
 		if (!serverUrl) throw new Error("coms-net: no server URL");
 		if (!authToken) throw new Error("coms-net: no auth token");
 		const url = serverUrl + urlPath;
@@ -452,7 +541,7 @@ export default function (pi: ExtensionAPI) {
 			"Authorization": `Bearer ${authToken}`,
 			"Accept": "application/json",
 		};
-		const init: any = { method, headers };
+		const init: RequestInit = { method, headers };
 		if (body !== undefined) {
 			headers["Content-Type"] = "application/json";
 			init.body = JSON.stringify(body);
@@ -462,31 +551,31 @@ export default function (pi: ExtensionAPI) {
 		const ac = new AbortController();
 		const timeoutMs = opts?.timeoutMs ?? HTTP_TIMEOUT_MS;
 		const timer = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, timeoutMs);
-		try { (timer as any).unref?.(); } catch { /* ignore */ }
+		try { timer.unref?.(); } catch { /* ignore */ }
 		init.signal = opts?.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal;
 		let resp: Response;
 		try {
 			resp = await fetch(url, init);
-		} catch (err: any) {
+		} catch (err) {
 			try { clearTimeout(timer); } catch { /* ignore */ }
 			if (opts?.signal?.aborted) throw new Error("coms-net: cancelled");
-			throw new Error(`coms-net: fetch failed: ${err?.message ?? String(err)}`);
+			throw new Error(`coms-net: fetch failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 		try { clearTimeout(timer); } catch { /* ignore */ }
 		const text = await resp.text();
-		let parsed: any = null;
+		let parsed: unknown = null;
 		if (text.length > 0) {
 			try { parsed = JSON.parse(text); } catch { parsed = text; }
 		}
 		if (!resp.ok) {
 			throw new HttpError(resp.status, parsed, `HTTP ${resp.status} ${method} ${urlPath}`);
 		}
-		return parsed;
+		return parsed as T;
 	}
 
 	// ━━ Audit log helper (never throws) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-	function audit(event: string, extra: Record<string, any> = {}): void {
+	function audit(event: string, extra: Record<string, unknown> = {}): void {
 		try {
 			pi.appendEntry("coms-net-log", { event, ts: nowIso(), ...extra });
 		} catch {
@@ -496,7 +585,7 @@ export default function (pi: ExtensionAPI) {
 
 	// ━━ Strip auth token from any user-visible error string ━━━━━━━━━━━━━━━
 
-	function safeError(err: any): string {
+	function safeError(err: unknown): string {
 		const msg = err instanceof Error ? err.message : String(err);
 		if (!authToken) return msg;
 		// Defense in depth: never leak the bearer.
@@ -555,8 +644,8 @@ export default function (pi: ExtensionAPI) {
 		return { ...prev, ...patch };
 	}
 
-	function handleSseEvent(event: string, data: any, _id?: string): void {
-		if (!data || typeof data !== "object") return;
+	function handleSseEvent(event: string, data: unknown, _id?: string): void {
+		if (!isRecord(data)) return;
 		switch (event) {
 			case "hello": {
 				audit("sse_hello", { server_id: data.server_id, server_time: data.server_time });
@@ -574,7 +663,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			case "agent_joined": {
-				const a: AgentCard | undefined = data.agent;
+				const a = data.agent as AgentCard | undefined;
 				if (!a || typeof a.session_id !== "string") return;
 				if (identity && a.session_id === identity.session_id) return;
 				peerCards.set(a.session_id, a);
@@ -582,7 +671,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			case "agent_updated": {
-				const a: Partial<AgentCard> | undefined = data.agent;
+				const a = data.agent as Partial<AgentCard> | undefined;
 				if (!a || typeof a.session_id !== "string") return;
 				if (identity && a.session_id === identity.session_id) return;
 				const prev = peerCards.get(a.session_id);
@@ -596,7 +685,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			case "agent_stale": {
-				const sid: string | undefined = data.session_id;
+				const sid = data.session_id as string | undefined;
 				if (!sid) return;
 				const prev = peerCards.get(sid);
 				if (prev) {
@@ -606,7 +695,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			case "agent_left": {
-				const sid: string | undefined = data.session_id;
+				const sid = data.session_id as string | undefined;
 				if (!sid) return;
 				if (peerCards.delete(sid)) {
 					maybeRequestRender();
@@ -637,10 +726,10 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	function handleInboundPrompt(data: any): void {
-		const msg_id: string | undefined = data?.msg_id;
+	function handleInboundPrompt(data: Record<string, unknown>): void {
+		const msg_id = data?.msg_id;
 		if (!msg_id || typeof msg_id !== "string") return;
-		const sender = data.sender ?? {};
+		const sender: Record<string, unknown> = isRecord(data.sender) ? data.sender : {};
 		const senderName = typeof sender.name === "string" ? sender.name : "unknown";
 		const senderCwd = typeof sender.cwd === "string" ? sender.cwd : "?";
 		const senderSession = typeof sender.session_id === "string" ? sender.session_id : "?";
@@ -730,8 +819,8 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	function handleInboundResponse(data: any): void {
-		const msg_id: string | undefined = data?.msg_id;
+	function handleInboundResponse(data: Record<string, unknown>): void {
+		const msg_id = data?.msg_id as string | undefined;
 		if (!msg_id) return;
 		const responseVal = data.response;
 		const errVal: string | null = typeof data.error === "string" ? data.error : null;
@@ -769,7 +858,7 @@ export default function (pi: ExtensionAPI) {
 		let resp: Response;
 		try {
 			resp = await fetch(url, { method: "GET", headers, signal: ac.signal });
-		} catch (err: any) {
+		} catch (err) {
 			audit("sse_connect_failed", { reason: safeError(err) });
 			scheduleReconnect();
 			return;
@@ -795,7 +884,7 @@ export default function (pi: ExtensionAPI) {
 				if (value) parser.feed(value);
 			}
 			audit("sse_disconnect", { reason: "stream_end" });
-		} catch (err: any) {
+		} catch (err) {
 			if (ac.signal.aborted) {
 				audit("sse_disconnect", { reason: "aborted" });
 				return;
@@ -831,7 +920,7 @@ export default function (pi: ExtensionAPI) {
 				scheduleReconnect();
 			}
 		}, backoff);
-		try { (reconnectTimer as any).unref?.(); } catch { /* ignore */ }
+		try { reconnectTimer.unref?.(); } catch { /* ignore */ }
 	}
 
 	async function reRegisterAndOpen(): Promise<void> {
@@ -1046,7 +1135,7 @@ export default function (pi: ExtensionAPI) {
 					audit("heartbeat_failed", { reason: safeError(err) });
 				});
 		}, HEARTBEAT_MS);
-		try { (heartbeatTimer as any).unref?.(); } catch { /* ignore */ }
+		try { heartbeatTimer.unref?.(); } catch { /* ignore */ }
 	});
 
 	// ━━ Pool widget rendering ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1184,7 +1273,7 @@ export default function (pi: ExtensionAPI) {
 			const projectFilter = params.project ?? identity.project;
 			const includeExp = params.include_explicit === true;
 			const qs = `?project=${encodeURIComponent(projectFilter)}&include_explicit=${includeExp ? "true" : "false"}`;
-			const resp = await httpFetch("GET", `/v1/agents${qs}`, undefined, { signal });
+			const resp = await httpFetch<AgentsResponse>("GET", `/v1/agents${qs}`, undefined, { signal });
 			const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
 			const peers = agents.filter(a => a.session_id !== identity!.session_id);
 
@@ -1202,7 +1291,7 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 		renderCall(args, theme) {
-			const proj = (args as any).project;
+			const proj = args.project;
 			const filter = proj ? ` ${proj}` : "";
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_list")) + theme.fg("dim", filter),
@@ -1210,8 +1299,8 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 		renderResult(result, options, theme) {
-			const details = result.details as any;
-			const agents: any[] = details?.agents ?? [];
+			const details = result.details as ListDetails | undefined;
+			const agents: AgentCard[] = details?.agents ?? [];
 			const header = theme.fg("accent", `${agents.length} peer(s)`);
 			if (!options.expanded || agents.length === 0) {
 				return new Text(header, 0, 0);
@@ -1276,7 +1365,7 @@ export default function (pi: ExtensionAPI) {
 				resp = await httpFetch("POST", "/v1/messages", req) as SendResponse;
 			} catch (err) {
 				if (err instanceof HttpError) {
-					const detail = (err.body && err.body.error) || err.message;
+					const detail = err.detail();
 					throw new Error(`coms-net: send failed (${err.status}): ${detail}`);
 				}
 				throw new Error(`coms-net: send failed: ${safeError(err)}`);
@@ -1284,8 +1373,8 @@ export default function (pi: ExtensionAPI) {
 			const { msg_id, target_session } = resp;
 
 			// Park a pending entry that the SSE `response` event will resolve.
-			let resolveFn!: (v: { response?: any; error?: string | null }) => void;
-			const promise = new Promise<{ response?: any; error?: string | null }>((res) => {
+			let resolveFn!: (v: ReplyResult) => void;
+			const promise = new Promise<ReplyResult>((res) => {
 				resolveFn = res;
 			});
 			rememberPending(msg_id, {
@@ -1316,8 +1405,8 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 		renderCall(args, theme) {
-			const tgt = (args as any).target ?? "?";
-			const prompt = (args as any).prompt ?? "";
+			const tgt = args.target ?? "?";
+			const prompt = args.prompt ?? "";
 			const preview = prompt.length > 60 ? prompt.slice(0, 57) + "..." : prompt;
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_send ")) +
@@ -1328,7 +1417,7 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 		renderResult(result, _options, theme) {
-			const d = result.details as any;
+			const d = result.details as SendDetails | undefined;
 			if (!d) {
 				const t = result.content[0];
 				return new Text(t?.type === "text" ? t.text : "", 0, 0);
@@ -1372,9 +1461,9 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			// Fall back to server.
-			let resp: any;
+			let resp: MessageStatusResponse;
 			try {
-				resp = await httpFetch("GET", `/v1/messages/${encodeURIComponent(msg_id)}`, undefined, { signal });
+				resp = await httpFetch<MessageStatusResponse>("GET", `/v1/messages/${encodeURIComponent(msg_id)}`, undefined, { signal });
 			} catch (err) {
 				if (err instanceof HttpError && err.status === 404) {
 					return {
@@ -1403,14 +1492,14 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 		renderCall(args, theme) {
-			const id = (args as any).msg_id ?? "?";
+			const id = args.msg_id ?? "?";
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_get ")) + theme.fg("warning", id),
 				0, 0,
 			);
 		},
 		renderResult(result, _options, theme) {
-			const d = result.details as any;
+			const d = result.details as GetDetails | undefined;
 			const status = d?.status ?? "?";
 			const color = status === "complete" ? "success"
 				: status === "pending" || status === "queued" || status === "delivered" ? "warning"
@@ -1453,8 +1542,8 @@ export default function (pi: ExtensionAPI) {
 			const qs =
 				`?project=${encodeURIComponent(identity.project)}&name=${encodeURIComponent(name)}&limit=${limit}` +
 				(since ? `&since=${encodeURIComponent(since)}` : "");
-			const resp = await httpFetch("GET", `/v1/mailbox${qs}`, undefined, { signal });
-			const messages: any[] = Array.isArray(resp?.messages) ? resp.messages : [];
+			const resp = await httpFetch<MailboxResponse>("GET", `/v1/mailbox${qs}`, undefined, { signal });
+			const messages: MailboxMessage[] = Array.isArray(resp?.messages) ? resp.messages : [];
 			const text = formatInbox(
 				name,
 				messages.map((m) => ({
@@ -1474,14 +1563,14 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 		renderCall(args, theme) {
-			const n = (args as any).name;
+			const n = args.name;
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_inbox")) + theme.fg("dim", n ? ` ${n}` : ""),
 				0, 0,
 			);
 		},
 		renderResult(result, _options, theme) {
-			const d = result.details as any;
+			const d = result.details as InboxDetails | undefined;
 			return new Text(
 				theme.fg("accent", `${d?.count ?? "?"} message(s)`) + theme.fg("dim", ` in ${d?.name ?? "inbox"}`),
 				0, 0,
@@ -1531,14 +1620,14 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 		renderCall(args, theme) {
-			const id = (args as any).msg_id ?? "?";
+			const id = args.msg_id ?? "?";
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_await ")) + theme.fg("warning", id),
 				0, 0,
 			);
 		},
 		renderResult(result, _options, theme) {
-			const d = result.details as any;
+			const d = result.details as AwaitDetails | undefined;
 			if (d?.error) return new Text(theme.fg("error", `✗ ${d.error}`), 0, 0);
 			return new Text(theme.fg("success", "✓ response received"), 0, 0);
 		},
@@ -1559,12 +1648,12 @@ export default function (pi: ExtensionAPI) {
 
 		const serverTimeoutMs = Math.min(timeoutMs, MESSAGE_TIMEOUT_MS);
 		const ac = new AbortController();
-		const serverPromise: Promise<ReplyResult> = httpFetch(
+		const serverPromise: Promise<ReplyResult> = httpFetch<MessageStatusResponse>(
 			"GET",
 			`/v1/messages/${encodeURIComponent(msg_id)}/await?timeout_ms=${serverTimeoutMs}`,
 			undefined,
 			{ timeoutMs: serverTimeoutMs + 5_000, signal: ac.signal },
-		).then((data: any) => {
+		).then((data) => {
 			if (data?.status === "complete") return { response: data.response, error: null };
 			if (data?.status === "error") return { response: null, error: data.error ?? "error" };
 			if (data?.status === "timeout") return { response: null, error: "timeout" };
@@ -1579,7 +1668,7 @@ export default function (pi: ExtensionAPI) {
 		let timer: ReturnType<typeof setTimeout> | null = null;
 		const timeoutPromise = new Promise<ReplyResult>((resolve) => {
 			timer = setTimeout(() => resolve({ response: null, error: "timeout" }), timeoutMs);
-			try { (timer as any).unref?.(); } catch { /* ignore */ }
+			try { timer.unref?.(); } catch { /* ignore */ }
 		});
 
 		let onAbort: (() => void) | null = null;
@@ -1632,7 +1721,7 @@ export default function (pi: ExtensionAPI) {
 			// Resolve targets: explicit list, or every reachable peer in the project.
 			let targets: string[] = params.targets ?? [];
 			if (targets.length === 0) {
-				const resp = await httpFetch("GET", `/v1/agents?project=${encodeURIComponent(identity.project)}&include_explicit=false`, undefined, { signal });
+				const resp = await httpFetch<AgentsResponse>("GET", `/v1/agents?project=${encodeURIComponent(identity.project)}&include_explicit=false`, undefined, { signal });
 				const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
 				targets = agents
 					.filter((a) => a.session_id !== identity!.session_id && a.status !== "offline")
@@ -1660,8 +1749,8 @@ export default function (pi: ExtensionAPI) {
 						hops,
 					};
 					const resp = await httpFetch("POST", "/v1/messages", req) as SendResponse;
-					let resolveFn!: (v: { response?: any; error?: string | null }) => void;
-					const promise = new Promise<{ response?: any; error?: string | null }>((res) => {
+					let resolveFn!: (v: ReplyResult) => void;
+					const promise = new Promise<ReplyResult>((res) => {
 						resolveFn = res;
 					});
 					rememberPending(resp.msg_id, {
@@ -1684,7 +1773,7 @@ export default function (pi: ExtensionAPI) {
 					} catch { /* best-effort */ }
 					return { target, msg_id: resp.msg_id as string | null, error: null as string | null };
 				} catch (err) {
-					const detail = err instanceof HttpError ? ((err.body && err.body.error) || err.message) : safeError(err);
+					const detail = err instanceof HttpError ? err.detail() : safeError(err);
 					return { target, msg_id: null as string | null, error: `send failed: ${detail}` };
 				}
 			}));
@@ -1709,10 +1798,10 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 		renderCall(args, theme) {
-			const tgts = Array.isArray((args as any).targets) && (args as any).targets.length > 0
-				? (args as any).targets.join(", ")
+			const tgts = Array.isArray(args.targets) && args.targets.length > 0
+				? args.targets.join(", ")
 				: "all peers";
-			const prompt = (args as any).prompt ?? "";
+			const prompt = args.prompt ?? "";
 			const preview = prompt.length > 50 ? prompt.slice(0, 47) + "..." : prompt;
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_broadcast ")) +
@@ -1723,7 +1812,7 @@ export default function (pi: ExtensionAPI) {
 			);
 		},
 		renderResult(result, options, theme) {
-			const d = result.details as any;
+			const d = result.details as BroadcastDetails | undefined;
 			if (!d) {
 				const t = result.content[0];
 				return new Text(t?.type === "text" ? t.text : "", 0, 0);
@@ -1733,7 +1822,7 @@ export default function (pi: ExtensionAPI) {
 			if (!options.expanded || !Array.isArray(d.results) || d.results.length === 0) {
 				return new Text(header, 0, 0);
 			}
-			const rows = d.results.map((r: any) => {
+			const rows = d.results.map((r) => {
 				const dot = r.error ? theme.fg("error", "✗") : theme.fg("success", "●");
 				const tail = r.error ? theme.fg("error", r.error) : theme.fg("dim", `msg_id ${r.msg_id}`);
 				return `${dot} ${theme.fg("accent", r.target)} ${tail}`;
@@ -1771,7 +1860,7 @@ export default function (pi: ExtensionAPI) {
 						error: reply.error,
 					});
 				} catch { /* best-effort */ }
-			} catch (e: any) {
+			} catch (e) {
 				audit("response_out_failed", { msg_id: reply.msg_id, reason: safeError(e) });
 			}
 		}));
@@ -1804,7 +1893,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			if (trimmed.includes("--server")) {
 				try {
-					const health = await httpFetch("GET", "/health");
+					const health = await httpFetch<HealthResponse>("GET", "/health");
 					ctx.ui.notify(
 						`coms-net server: ${serverUrl} · version ${health?.version ?? "?"} · server_id ${health?.server_id ?? "?"}`,
 						"info",
@@ -1823,7 +1912,7 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const projectFilter = displayProject ?? identity?.project ?? "default";
 				const qs = `?project=${encodeURIComponent(projectFilter)}&include_explicit=${includeExplicit ? "true" : "false"}`;
-				const resp = await httpFetch("GET", `/v1/agents${qs}`);
+				const resp = await httpFetch<AgentsResponse>("GET", `/v1/agents${qs}`);
 				const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
 				peerCards.clear();
 				for (const a of agents) {
@@ -1860,7 +1949,7 @@ export default function (pi: ExtensionAPI) {
 		if (identity && serverUrl && authToken) {
 			const ac = new AbortController();
 			const t = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, SHUTDOWN_DELETE_TIMEOUT_MS);
-			try { (t as any).unref?.(); } catch { /* ignore */ }
+			try { t.unref?.(); } catch { /* ignore */ }
 			try {
 				await httpFetch(
 					"DELETE",

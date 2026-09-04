@@ -4,7 +4,7 @@ import { checkAlarms } from "../scripts/monitor/checks/alarms.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 function fakeClient(alarms: { AlarmName: string; StateValue: string }[]) {
-	return { send: async (_cmd: any) => ({ MetricAlarms: alarms, CompositeAlarms: [] }) };
+	return { send: async (_cmd: unknown) => ({ MetricAlarms: alarms, CompositeAlarms: [] }) };
 }
 
 describe("checkAlarms", () => {

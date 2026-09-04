@@ -1,5 +1,12 @@
 // scripts/monitor/checks/trail.ts
-import { DescribeTrailsCommand, GetTrailStatusCommand } from "@aws-sdk/client-cloudtrail";
+import {
+	DescribeTrailsCommand,
+	type DescribeTrailsCommandOutput,
+	GetTrailStatusCommand,
+	type GetTrailStatusCommandOutput,
+	type Trail,
+} from "@aws-sdk/client-cloudtrail";
+import { errorMessage } from "../errors.ts";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -9,8 +16,8 @@ import type { AwsClient } from "./alarms.ts";
 export async function checkTrail(client: AwsClient, state: MonitorState): Promise<Finding[]> {
 	const findings: Finding[] = [];
 	const at = new Date().toISOString();
-	const resp = await client.send(new DescribeTrailsCommand({}));
-	const trails: any[] = resp.trailList ?? [];
+	const resp = (await client.send(new DescribeTrailsCommand({}))) as DescribeTrailsCommandOutput;
+	const trails: Trail[] = resp.trailList ?? [];
 
 	if (trails.length === 0) {
 		const key = "trail:none:";
@@ -33,13 +40,15 @@ export async function checkTrail(client: AwsClient, state: MonitorState): Promis
 	const errors: string[] = [];
 	for (const t of trails) {
 		const name: string = t.Name ?? t.TrailARN ?? "unknown";
-		let status: any;
+		let status: GetTrailStatusCommandOutput;
 		try {
-			status = await client.send(new GetTrailStatusCommand({ Name: t.TrailARN ?? name }));
-		} catch (e: any) {
+			status = (await client.send(
+				new GetTrailStatusCommand({ Name: t.TrailARN ?? name }),
+			)) as GetTrailStatusCommandOutput;
+		} catch (e) {
 			// Shadow org trails from the management account can deny status reads
 			// to a member account; only an all-trails failure is a check error.
-			errors.push(`${name}: ${e?.message ?? e}`);
+			errors.push(`${name}: ${errorMessage(e)}`);
 			continue;
 		}
 		const conditions: { key: string; severity: "critical" | "warn"; summary: string; evidence: unknown }[] = [];

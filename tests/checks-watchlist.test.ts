@@ -1,5 +1,7 @@
 // tests/checks-watchlist.test.ts
+
 import { describe, expect, test } from "bun:test";
+import type { LookupEventsCommand } from "@aws-sdk/client-cloudtrail";
 import { checkWatchlist, DEFAULT_WATCHLIST } from "../scripts/monitor/checks/watchlist.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
@@ -9,8 +11,8 @@ const NOW = Date.parse("2026-09-01T12:00:00Z");
 function fakeClient(hits: Record<string, { id: string; user: string }[]>, seen: string[] = []) {
 	return {
 		seen,
-		send: async (cmd: any) => {
-			const name = cmd.input.LookupAttributes[0].AttributeValue as string;
+		send: async (cmd: LookupEventsCommand) => {
+			const name = cmd.input.LookupAttributes?.[0]?.AttributeValue as string;
 			seen.push(name);
 			return {
 				Events: (hits[name] ?? []).map((h) => ({
@@ -41,7 +43,7 @@ describe("checkWatchlist", () => {
 		expect(out[0].severity).toBe("warn");
 		expect(out[0].summary).toContain("StopLogging");
 		expect(out[0].summary).toContain("mallory");
-		expect((out[0].evidence as any).sourceIp).toBe("10.0.0.1");
+		expect((out[0].evidence as { sourceIp: string }).sourceIp).toBe("10.0.0.1");
 	});
 
 	test("event-id dedup absorbs watermark overlap", async () => {

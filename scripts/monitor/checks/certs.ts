@@ -1,5 +1,12 @@
 // scripts/monitor/checks/certs.ts
-import { DescribeCertificateCommand, ListCertificatesCommand } from "@aws-sdk/client-acm";
+import {
+	type CertificateDetail,
+	DescribeCertificateCommand,
+	type DescribeCertificateCommandOutput,
+	ListCertificatesCommand,
+	type ListCertificatesCommandOutput,
+} from "@aws-sdk/client-acm";
+import { errorMessage } from "../errors.ts";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -10,6 +17,12 @@ const WARN_DAYS = 30;
 const CRIT_DAYS = 7;
 const REALERT_MS = 7 * 86_400_000;
 const DAY_MS = 86_400_000;
+
+// Only certificates with an expiry take part in the scan.
+type DatedCert = CertificateDetail & { NotAfter: Date };
+function hasNotAfter(c: CertificateDetail | undefined): c is DatedCert {
+	return c?.NotAfter != null;
+}
 
 export type CheckCertsOpts = { now?: number; warnDays?: number; critDays?: number };
 export type RegionalAcm = { region: string; client: AwsClient };
@@ -39,7 +52,7 @@ export async function checkCerts(
 	const certs: {
 		arn: string;
 		region: string;
-		cert: any;
+		cert: DatedCert;
 		daysLeft: number;
 		names: string[];
 	}[] = [];
@@ -48,21 +61,25 @@ export async function checkCerts(
 			const arns: string[] = [];
 			let nextToken: string | undefined;
 			do {
-				const resp: any = await client.send(new ListCertificatesCommand({ NextToken: nextToken }));
+				const resp = (await client.send(
+					new ListCertificatesCommand({ NextToken: nextToken }),
+				)) as ListCertificatesCommandOutput;
 				for (const c of resp.CertificateSummaryList ?? []) if (c.CertificateArn) arns.push(c.CertificateArn);
 				nextToken = resp.NextToken;
 			} while (nextToken);
 			for (const arn of arns) {
-				const resp: any = await client.send(new DescribeCertificateCommand({ CertificateArn: arn }));
+				const resp = (await client.send(
+					new DescribeCertificateCommand({ CertificateArn: arn }),
+				)) as DescribeCertificateCommandOutput;
 				const cert = resp.Certificate;
-				if (!cert?.NotAfter) continue;
+				if (!hasNotAfter(cert)) continue;
 				const daysLeft = Math.floor((new Date(cert.NotAfter).getTime() - now) / DAY_MS);
 				const names = [cert.DomainName, ...(cert.SubjectAlternativeNames ?? [])].filter(
 					(n: unknown): n is string => typeof n === "string" && n.length > 0,
 				);
 				certs.push({ arn, region, cert, daysLeft, names });
 			}
-		} catch (e: any) {
+		} catch (e) {
 			// One unreachable region must not kill the scan: report it once as an
 			// info scoping fact and keep scanning the other regions.
 			const scopeKey = `cert:scope:${region}:`;
@@ -72,9 +89,9 @@ export async function checkCerts(
 					family: "cert",
 					severity: "info",
 					resource: region,
-					summary: `ACM in ${region} is unreadable (not inspected): ${e?.message ?? e}`,
+					summary: `ACM in ${region} is unreadable (not inspected): ${errorMessage(e)}`,
 					dedup_key: scopeKey,
-					evidence: { region, error: String(e?.message ?? e) },
+					evidence: { region, error: errorMessage(e) },
 					at,
 				});
 			}

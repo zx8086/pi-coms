@@ -3,7 +3,17 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { api, readSseEvents, register, startHub, stopAllHubs, TOKEN } from "./harness.ts";
+import {
+	type AgentListing,
+	api,
+	type InboxListing,
+	readSseEvents,
+	register,
+	type SendResponse,
+	startHub,
+	stopAllHubs,
+	TOKEN,
+} from "./harness.ts";
 
 const tmpDirs: string[] = [];
 afterEach(async () => {
@@ -109,8 +119,8 @@ describe("directory auth", () => {
 
 		// simon's registration is gone; jane still authenticates
 		const list = await api(hub, "GET", "/v1/agents?project=default&include_explicit=true", undefined, JANE_TOKEN);
-		const agents = ((await list.json()) as any).agents;
-		expect(agents.some((a: any) => a.name === "simon")).toBe(false);
+		const agents = ((await list.json()) as AgentListing).agents;
+		expect(agents.some((a) => a.name === "simon")).toBe(false);
 		await resp.body?.cancel();
 	});
 
@@ -156,7 +166,7 @@ describe("directory auth", () => {
 			prompt: "question", conversation_id: null, response_schema: null, hops: 0,
 		}, SIMON_TOKEN);
 		expect(s.status).toBe(200);
-		const msg_id = ((await s.json()) as any).msg_id as string;
+		const msg_id = ((await s.json()) as SendResponse).msg_id;
 		await readSseEvents(resp, "prompt", 1);
 
 		const answer = { responder_session: "AG", response: "forged", error: null };
@@ -177,10 +187,10 @@ describe("directory auth", () => {
 
 		const kim = await api(hub, "GET", "/v1/mailbox?project=default&name=ops", undefined, KIM_TOKEN);
 		expect(kim.status).toBe(200);
-		const kimMsgs = ((await kim.json()) as any).messages;
-		expect(kimMsgs.map((m: any) => m.prompt)).toEqual(["nightly digest"]);
+		const kimMsgs = ((await kim.json()) as InboxListing).messages;
+		expect(kimMsgs.map((m) => m.prompt)).toEqual(["nightly digest"]);
 
 		const simon = await api(hub, "GET", "/v1/mailbox?project=default&name=ops", undefined, SIMON_TOKEN);
-		expect(((await simon.json()) as any).messages.map((m: any) => m.msg_id)).toEqual(kimMsgs.map((m: any) => m.msg_id));
+		expect(((await simon.json()) as InboxListing).messages.map((m) => m.msg_id)).toEqual(kimMsgs.map((m) => m.msg_id));
 	});
 });

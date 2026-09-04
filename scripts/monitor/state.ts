@@ -28,7 +28,7 @@ export class MonitorState {
 	}
 
 	getWatermark(key: string): number | null {
-		const r = this.db.query("SELECT ts FROM watermarks WHERE key = ?").get(key) as any;
+		const r = this.db.query("SELECT ts FROM watermarks WHERE key = ?").get(key) as { ts: number } | null;
 		return r ? Number(r.ts) : null;
 	}
 	setWatermark(key: string, ts: number): void {
@@ -40,7 +40,9 @@ export class MonitorState {
 	// true when never alerted, or when reAlertMs is given and the last alert is
 	// older than it. Omitted reAlertMs means alert once until cleared.
 	shouldAlert(key: string, reAlertMs?: number): boolean {
-		const r = this.db.query("SELECT last_alerted FROM fingerprints WHERE key = ?").get(key) as any;
+		const r = this.db.query("SELECT last_alerted FROM fingerprints WHERE key = ?").get(key) as {
+			last_alerted: number;
+		} | null;
 		if (!r) return true;
 		if (reAlertMs === undefined) return false;
 		return Date.now() - Number(r.last_alerted) > reAlertMs;
@@ -57,12 +59,14 @@ export class MonitorState {
 	}
 	alertKeys(prefix: string): string[] {
 		return (
-			this.db.query("SELECT key FROM fingerprints WHERE key LIKE ? || '%' ORDER BY key").all(prefix) as any[]
+			this.db.query("SELECT key FROM fingerprints WHERE key LIKE ? || '%' ORDER BY key").all(prefix) as {
+				key: string;
+			}[]
 		).map((r) => r.key);
 	}
 
 	getSnapshot(name: string): Record<string, string> | null {
-		const r = this.db.query("SELECT value FROM snapshots WHERE name = ?").get(name) as any;
+		const r = this.db.query("SELECT value FROM snapshots WHERE name = ?").get(name) as { value: string } | null;
 		return r ? JSON.parse(r.value) : null;
 	}
 	setSnapshot(name: string, v: Record<string, string>): void {
@@ -79,12 +83,15 @@ export class MonitorState {
 	costBaseline(excludeDate: string, days: number): number | null {
 		const rows = this.db.query(
 			"SELECT usd FROM costs WHERE date < ? ORDER BY date DESC LIMIT ?",
-		).all(excludeDate, days) as any[];
+		).all(excludeDate, days) as { usd: number }[];
 		if (rows.length === 0) return null;
 		return rows.reduce((a, r) => a + Number(r.usd), 0) / rows.length;
 	}
 	latestCost(): { date: string; usd: number } | null {
-		const r = this.db.query("SELECT date, usd FROM costs ORDER BY date DESC LIMIT 1").get() as any;
+		const r = this.db.query("SELECT date, usd FROM costs ORDER BY date DESC LIMIT 1").get() as {
+			date: string;
+			usd: number;
+		} | null;
 		return r ? { date: r.date, usd: Number(r.usd) } : null;
 	}
 
@@ -102,7 +109,7 @@ export class MonitorState {
 		const rows = kind
 			? this.db.query("SELECT ts, kind, payload FROM journal WHERE ts_ms >= ? AND kind = ? ORDER BY id ASC").all(cutoff, kind)
 			: this.db.query("SELECT ts, kind, payload FROM journal WHERE ts_ms >= ? ORDER BY id ASC").all(cutoff);
-		return rows as any[];
+		return rows as { ts: string; kind: string; payload: string }[];
 	}
 	// History is kept, not hoarded: findings older than the retention window
 	// stop informing anything and only grow the db.
@@ -113,7 +120,7 @@ export class MonitorState {
 	priorIncidents(resource: string, limit: number): { ts: string; payload: string }[] {
 		return this.db.query(
 			"SELECT ts, payload FROM journal WHERE kind = 'finding' AND payload LIKE '%' || ? || '%' ORDER BY id DESC LIMIT ?",
-		).all(resource, limit) as any[];
+		).all(resource, limit) as { ts: string; payload: string }[];
 	}
 
 	// The known-gap ledger: operator-accepted imperfections stop re-raising as
@@ -130,12 +137,12 @@ export class MonitorState {
 	listSuppressions(): { pattern: string; reason: string; created_at: string }[] {
 		return this.db.query(
 			"SELECT pattern, reason, created_at FROM suppressions ORDER BY created_at ASC",
-		).all() as any[];
+		).all() as { pattern: string; reason: string; created_at: string }[];
 	}
 	matchSuppression(dedupKey: string): { pattern: string; reason: string } | null {
 		const r = this.db.query(
 			"SELECT pattern, reason FROM suppressions WHERE ? LIKE pattern LIMIT 1",
-		).get(dedupKey) as any;
+		).get(dedupKey) as { pattern: string; reason: string } | null;
 		return r ? { pattern: r.pattern, reason: r.reason } : null;
 	}
 
@@ -148,7 +155,12 @@ export class MonitorState {
 		);
 	}
 	unsent(): { id: number; target: string; prompt: string; ttl_ms: number }[] {
-		return this.db.query("SELECT id, target, prompt, ttl_ms FROM unsent ORDER BY id ASC").all() as any[];
+		return this.db.query("SELECT id, target, prompt, ttl_ms FROM unsent ORDER BY id ASC").all() as {
+			id: number;
+			target: string;
+			prompt: string;
+			ttl_ms: number;
+		}[];
 	}
 	deleteUnsent(id: number): void {
 		this.db.query("DELETE FROM unsent WHERE id = ?").run(id);

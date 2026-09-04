@@ -22,8 +22,8 @@
 import { Database } from "bun:sqlite";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Env-var reads (module scope; all tunables here)
@@ -192,7 +192,7 @@ export type ComsMessage = {
 	hops: number;
 	status: MessageStatus;
 	mailbox: boolean; // requested TTL beyond the default: retained as inbox history until expiry
-	response?: any;
+	response?: unknown;
 	error?: string | null;
 	created_at: string;
 	delivered_at?: string;
@@ -249,11 +249,11 @@ export type SendResponse = {
 export type ResponseSubmitRequest = {
 	project: string;
 	responder_session: string;
-	response: any;
+	response: unknown;
 	error: string | null;
 };
 
-export type ErrorResponse = { ok: false; error: string; details?: any };
+export type ErrorResponse = { ok: false; error: string; details?: unknown };
 
 // SSE writer & per-project state
 type Awaiter = {
@@ -354,10 +354,12 @@ export function nameAllowed(p: { names: string[] }, name: string): boolean {
 	return false;
 }
 
-function parseDirectoryEntries(principals: Record<string, any> | undefined): Map<string, AuthPrincipal> {
+function parseDirectoryEntries(principals: Record<string, unknown> | undefined): Map<string, AuthPrincipal> {
 	const map = new Map<string, AuthPrincipal>();
-	for (const [principal, rec] of Object.entries(principals ?? {})) {
-		if (!rec || typeof rec.token !== "string" || rec.token.length < 16) continue;
+	for (const [principal, raw] of Object.entries(principals ?? {})) {
+		if (!raw || typeof raw !== "object") continue;
+		const rec = raw as { token?: unknown; kind?: unknown; names?: unknown };
+		if (typeof rec.token !== "string" || rec.token.length < 16) continue;
 		const names = Array.isArray(rec.names)
 			? rec.names.filter((n: unknown): n is string => typeof n === "string")
 			: [];
@@ -388,7 +390,7 @@ async function refreshTokenDirectory(): Promise<void> {
 			await proc.exited;
 			if (proc.exitCode !== 0) throw new Error(`aws ssm exited ${proc.exitCode}`);
 			const parsed = JSON.parse(out);
-			const principals: Record<string, any> = {};
+			const principals: Record<string, unknown> = {};
 			for (const p of parsed.Parameters ?? []) {
 				const name = String(p.Name ?? "").split("/").pop() ?? "";
 				if (!name) continue;
@@ -400,10 +402,10 @@ async function refreshTokenDirectory(): Promise<void> {
 			}
 			next = parseDirectoryEntries(principals);
 		}
-	} catch (err: any) {
+	} catch (err) {
 		// Keep the previous directory on refresh failure: a transient SSM or
 		// file error must not lock the whole fleet out.
-		logRejected("auth_refresh_failed", String(err?.message ?? err));
+		logRejected("auth_refresh_failed", err instanceof Error ? err.message : String(err));
 		return;
 	}
 	if (!next) return;
@@ -471,7 +473,7 @@ export function json(body: unknown, status = 200): Response {
 	});
 }
 
-function errorJson(error: string, status = 400, details?: any): Response {
+function errorJson(error: string, status = 400, details?: unknown): Response {
 	const body: ErrorResponse = { ok: false, error };
 	if (details !== undefined) body.details = details;
 	return json(body, status);
@@ -534,6 +536,42 @@ export function resolveUniqueName(
 // Mailbox (bun:sqlite write-through; the in-memory map stays the hot path)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// One row of the messages table as sqlite returns it (JSON columns still text).
+type MessageRow = {
+	msg_id: string;
+	project: string;
+	sender_session: string;
+	sender_name: string;
+	sender_cwd: string;
+	target_session: string | null;
+	target_name: string | null;
+	prompt: string;
+	conversation_id: string | null;
+	response_schema: string | null;
+	hops: number;
+	status: string;
+	mailbox: number;
+	response: string | null;
+	error: string | null;
+	created_at: string;
+	delivered_at: string | null;
+	completed_at: string | null;
+	expires_at: string;
+};
+type InboxRow = Pick<
+	MessageRow,
+	| "msg_id"
+	| "sender_name"
+	| "target_name"
+	| "prompt"
+	| "status"
+	| "error"
+	| "response"
+	| "created_at"
+	| "delivered_at"
+	| "completed_at"
+>;
+
 export class MailStore {
 	private db: Database;
 	constructor(dbPath: string) {
@@ -590,7 +628,7 @@ export class MailStore {
 	loadNonTerminal(): ComsMessage[] {
 		const rows = this.db.query(
 			"SELECT * FROM messages WHERE status IN ('queued','delivered') ORDER BY created_at ASC",
-		).all() as any[];
+		).all() as MessageRow[];
 		return rows.map((r) => ({
 			msg_id: r.msg_id,
 			project: r.project,
@@ -644,7 +682,7 @@ export class MailStore {
 				`SELECT * FROM (SELECT ${cols} FROM messages WHERE ${scope}
 				ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC`,
 			).all(targetName, limit);
-		return (rows as any[]).map((r) => ({
+		return (rows as InboxRow[]).map((r) => ({
 			...r,
 			response: r.response == null ? null : JSON.parse(r.response),
 		}));
@@ -1548,7 +1586,12 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 				const set = proj.awaiters.get(id) ?? new Set<Awaiter>();
 				proj.awaiters.set(id, set);
 
-				const finalize = (payload: any) => {
+				const finalize = (payload: {
+					msg_id: string;
+					status: MessageStatus;
+					response: unknown;
+					error: string | null;
+				}) => {
 					if (done) return;
 					done = true;
 					try {
@@ -1585,7 +1628,7 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 					});
 				}, timeout_ms);
 				try {
-					(awaiter.timer as any).unref?.();
+					awaiter.timer.unref();
 				} catch {
 					// noop
 				}
@@ -1959,14 +2002,14 @@ function startLoops(): void {
 			void refreshTokenDirectory();
 		}, AUTH_REFRESH_MS);
 		try {
-			(authRefreshTimer as any).unref?.();
+			authRefreshTimer.unref();
 		} catch {
 			// noop
 		}
 	}
 	for (const t of [staleScanTimer, ttlScanTimer, keepaliveTimer]) {
 		try {
-			(t as any).unref?.();
+			t.unref();
 		} catch {
 			// noop
 		}
@@ -2023,7 +2066,7 @@ export async function main(): Promise<void> {
 	recoverMail();
 
 	// Boot Bun.serve.
-	const server = (globalThis as any).Bun.serve({
+	const server = Bun.serve({
 		hostname: HOST,
 		port: PORT,
 		fetch: router,

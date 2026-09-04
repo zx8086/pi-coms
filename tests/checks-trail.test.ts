@@ -1,12 +1,14 @@
 // tests/checks-trail.test.ts
 import { describe, expect, test } from "bun:test";
-import { DescribeTrailsCommand } from "@aws-sdk/client-cloudtrail";
+import { DescribeTrailsCommand, type GetTrailStatusCommand } from "@aws-sdk/client-cloudtrail";
 import { checkTrail } from "../scripts/monitor/checks/trail.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
-function fakeClient(trails: { name: string; status: any | Error }[]) {
+type TrailStatus = { IsLogging?: boolean; LatestDeliveryError?: string };
+
+function fakeClient(trails: { name: string; status: TrailStatus | Error }[]) {
 	return {
-		send: async (cmd: any) => {
+		send: async (cmd: DescribeTrailsCommand | GetTrailStatusCommand) => {
 			if (cmd instanceof DescribeTrailsCommand) {
 				return { trailList: trails.map((t) => ({ Name: t.name, TrailARN: `arn:trail/${t.name}` })) };
 			}
