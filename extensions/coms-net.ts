@@ -12,11 +12,10 @@
 //   pi -e extensions/coms-net.ts                       # auto-discover local server.json
 //   pi -e extensions/coms-net.ts --server-url http://host:port --auth-token <tok> --cname planner
 
-import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
-import { truncateToWidth } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import { buildTurnReplies, outboundHops } from "./turnReply.ts";
 import { buildIdentityNote } from "./identityNote.ts";
 import { formatInbox } from "./inboxFormat.ts";
@@ -945,6 +944,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		currentCtx = ctx;
+		const notify = (msg: string, level: "info" | "warning" | "error"): void => {
+			if (ctx.hasUI) ctx.ui.notify(msg, level);
+		};
 
 		// 1. Resolve identity from CLI > frontmatter > defaults.
 		const flags = readCliFlags(pi);
@@ -983,7 +985,7 @@ export default function (pi: ExtensionAPI) {
 		// 2. Resolve server URL.
 		serverUrl = resolveServerUrl(project, flags.serverUrl);
 		if (!serverUrl) {
-			ctx.ui?.notify?.(
+			notify(
 				`coms-net: no server URL for project "${project}". Start one with: bun scripts/coms-net-server.ts`,
 				"error",
 			);
@@ -994,7 +996,7 @@ export default function (pi: ExtensionAPI) {
 		// 3. Resolve auth token.
 		authToken = resolveAuthToken(project, flags.authToken);
 		if (!authToken) {
-			ctx.ui?.notify?.(
+			notify(
 				`coms-net: no auth token for project "${project}". Set PI_COMS_NET_AUTH_TOKEN or pass --auth-token. ` +
 				`If running a local server, ensure ~/.pi/coms-net/projects/${project}/server.secret.json exists with mode 0600.`,
 				"error",
@@ -1007,7 +1009,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			await httpFetch("GET", "/health");
 		} catch (err) {
-			ctx.ui?.notify?.(
+			notify(
 				`coms-net: server unreachable at ${serverUrl} — ${safeError(err)}. ` +
 				`Start one with: bun scripts/coms-net-server.ts`,
 				"error",
@@ -1021,7 +1023,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			reg = await registerAgent();
 		} catch (err) {
-			ctx.ui?.notify?.(
+			notify(
 				`coms-net: register failed — ${safeError(err)}`,
 				"error",
 			);
@@ -1221,8 +1223,8 @@ export default function (pi: ExtensionAPI) {
 			if (!identity) {
 				throw new Error("coms-net not initialised");
 			}
-			const projectFilter = (params as any).project ?? identity.project;
-			const includeExp = (params as any).include_explicit === true;
+			const projectFilter = params.project ?? identity.project;
+			const includeExp = params.include_explicit === true;
 			const qs = `?project=${encodeURIComponent(projectFilter)}&include_explicit=${includeExp ? "true" : "false"}`;
 			const resp = await httpFetch("GET", `/v1/agents${qs}`, undefined, { signal });
 			const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
@@ -1306,9 +1308,9 @@ export default function (pi: ExtensionAPI) {
 				target_session: null,
 				prompt: params.prompt,
 				conversation_id: null,
-				response_schema: ((params as any).response_schema as object | undefined) ?? null,
+				response_schema: (params.response_schema as object | undefined) ?? null,
 				hops,
-				ttl_ms: typeof (params as any).ttl_ms === "number" && (params as any).ttl_ms > 0 ? (params as any).ttl_ms : null,
+				ttl_ms: typeof params.ttl_ms === "number" && params.ttl_ms > 0 ? params.ttl_ms : null,
 			};
 
 			let resp: SendResponse;
@@ -1398,7 +1400,7 @@ export default function (pi: ExtensionAPI) {
 			msg_id: Type.String({ description: "msg_id returned by coms_net_send." }),
 		}),
 		async execute(_callId, params, signal) {
-			const msg_id = (params as any).msg_id as string;
+			const msg_id = params.msg_id;
 			// Local SSE-resolved fast path.
 			const pending = pendingReplies.get(msg_id);
 			if (pending && pending.result) {
@@ -1419,12 +1421,12 @@ export default function (pi: ExtensionAPI) {
 				if (err instanceof HttpError && err.status === 404) {
 					return {
 						content: [{ type: "text" as const, text: `coms_net_get: unknown msg_id ${msg_id}` }],
-						details: { status: "error", error: "unknown msg_id" },
+						details: { status: "error", response: null, error: "unknown msg_id" },
 					};
 				}
 				return {
 					content: [{ type: "text" as const, text: `coms_net_get: error — ${safeError(err)}` }],
-					details: { status: "error", error: safeError(err) },
+					details: { status: "error", response: null, error: safeError(err) },
 				};
 			}
 			const status = resp?.status ?? "pending";
@@ -1439,7 +1441,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			return {
 				content: [{ type: "text" as const, text: `coms_net_get: ${status}` }],
-				details: { status },
+				details: { status, response: null, error: null },
 			};
 		},
 		renderCall(args, theme) {
@@ -1481,15 +1483,15 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_callId, params, signal) {
 			if (!identity) throw new Error("coms-net not initialised");
-			const name = ((params as any).name as string | undefined) || INBOX_NAME;
-			const msgId = (params as any).msg_id as string | undefined;
+			const name = params.name || INBOX_NAME;
+			const msgId = params.msg_id;
 			// A full-body read must find its target: search at the server cap
 			// unless the caller narrowed the fetch explicitly.
 			const limit =
-				typeof (params as any).limit === "number" && (params as any).limit > 0
-					? (params as any).limit
+				typeof params.limit === "number" && params.limit > 0
+					? params.limit
 					: msgId ? 100 : 10;
-			const since = (params as any).since as string | undefined;
+			const since = params.since;
 			const qs =
 				`?project=${encodeURIComponent(identity.project)}&name=${encodeURIComponent(name)}&limit=${limit}` +
 				(since ? `&since=${encodeURIComponent(since)}` : "");
@@ -1551,23 +1553,23 @@ export default function (pi: ExtensionAPI) {
 			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Server cap applies. Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends." })),
 		}),
 		async execute(_callId, params, signal) {
-			const msg_id = (params as any).msg_id as string;
-			const timeoutMs = typeof (params as any).timeout_ms === "number" && (params as any).timeout_ms > 0
-				? (params as any).timeout_ms
+			const msg_id = params.msg_id;
+			const timeoutMs = typeof params.timeout_ms === "number" && params.timeout_ms > 0
+				? params.timeout_ms
 				: MESSAGE_TIMEOUT_MS;
 
 			const r = await awaitReplyResult(msg_id, timeoutMs, signal);
-			if (r.error) {
+			const details: { response: unknown; error: string | null } = { response: r.response ?? null, error: r.error ?? null };
+			if (details.error) {
 				return {
-					content: [{ type: "text" as const, text: `coms_net_await: error — ${r.error}` }],
-					details: { error: r.error },
+					content: [{ type: "text" as const, text: `coms_net_await: error — ${details.error}` }],
+					details,
 				};
 			}
-			const resp = r.response;
-			const text = typeof resp === "string" ? resp : JSON.stringify(resp, null, 2);
+			const text = typeof r.response === "string" ? r.response : JSON.stringify(r.response, null, 2);
 			return {
 				content: [{ type: "text" as const, text: clampToolText(text, `await-${msg_id}`) }],
-				details: { response: resp },
+				details,
 			};
 		},
 		renderCall(args, theme) {
@@ -1664,13 +1666,13 @@ export default function (pi: ExtensionAPI) {
 				throw new Error(`coms-net: hop limit reached (${hops} >= ${MAX_HOPS})`);
 			}
 
-			const prompt = (params as any).prompt as string;
-			const timeoutMs = typeof (params as any).timeout_ms === "number" && (params as any).timeout_ms > 0
-				? (params as any).timeout_ms
+			const prompt = params.prompt;
+			const timeoutMs = typeof params.timeout_ms === "number" && params.timeout_ms > 0
+				? params.timeout_ms
 				: MESSAGE_TIMEOUT_MS;
 
 			// Resolve targets: explicit list, or every reachable peer in the project.
-			let targets: string[] = Array.isArray((params as any).targets) ? (params as any).targets : [];
+			let targets: string[] = params.targets ?? [];
 			if (targets.length === 0) {
 				const resp = await httpFetch("GET", `/v1/agents?project=${encodeURIComponent(identity.project)}&include_explicit=false`, undefined, { signal });
 				const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
@@ -1784,22 +1786,22 @@ export default function (pi: ExtensionAPI) {
 
 	// ━━ agent_end: capture turn output and submit response ━━━━━━━━━━━━━━━━
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_end", async (event) => {
 		if (!identity || inboundQueue.size === 0) return;
 
-		// Walk the session branch for the most recent assistant text.
+		// The last assistant text of this run (follow-ups drain inside the run,
+		// so stacked inbound prompts are all answered by the time this fires).
 		let lastAssistantText = "";
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type === "message" && entry.message.role === "assistant") {
-				const m = entry.message as any;
-				if (typeof m.content === "string") {
-					lastAssistantText = m.content;
-				} else if (Array.isArray(m.content)) {
-					lastAssistantText = m.content
-						.filter((b: any) => b && b.type === "text")
-						.map((b: any) => b.text)
-						.join("\n");
-				}
+		for (const m of event.messages) {
+			if (m.role !== "assistant") continue;
+			const content: unknown = m.content;
+			if (typeof content === "string") {
+				lastAssistantText = content;
+			} else if (Array.isArray(content)) {
+				lastAssistantText = content
+					.filter((b): b is { type: "text"; text: string } => !!b && b.type === "text" && typeof b.text === "string")
+					.map((b) => b.text)
+					.join("\n");
 			}
 		}
 
@@ -1950,11 +1952,10 @@ export default function (pi: ExtensionAPI) {
 
 		if (currentCtx?.hasUI) {
 			try { currentCtx.ui.setWidget("coms-net-pool", undefined); } catch { /* ignore */ }
-			try { currentCtx.ui.setStatus("coms-net", ""); } catch { /* ignore */ }
+			try { currentCtx.ui.setStatus("coms-net", undefined); } catch { /* ignore */ }
 		}
 	}
 
+	// Pi emits session_shutdown itself on Ctrl+C, SIGHUP and SIGTERM.
 	pi.on("session_shutdown", async () => { await cleanShutdown(); });
-	process.on("SIGINT", () => { void cleanShutdown(); });
-	process.on("SIGTERM", () => { void cleanShutdown(); });
 }

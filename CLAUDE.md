@@ -38,5 +38,5 @@ Star topology inside the corp AWS estate: the hub is a zero-permission relay on 
 ## Conventions
 
 - Extensions are standalone .ts files; register tools at the top level of the extension function, not inside event handlers.
-- Available imports: `@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`, `@mariozechner/pi-ai`, `@sinclair/typebox`, plus deps in package.json.
+- Available imports: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `@earendil-works/pi-ai`, `typebox`, plus deps in package.json (resolved from the global Pi install at runtime).
 - Use `isToolCallEventType()` for type-safe `tool_call` event narrowing.
