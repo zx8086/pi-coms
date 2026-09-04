@@ -45,3 +45,41 @@ export function buildTurnReplies(
 	}
 	return replies;
 }
+
+// Pi's AgentMessage union includes entries without content (bash execution).
+export interface TurnMessage {
+	role: string;
+	content?: unknown;
+}
+
+// The final assistant text of a run: the latest assistant message wins, text
+// blocks join with "\n", thinking and tool-call blocks are not part of a reply.
+export function lastAssistantText(messages: Iterable<TurnMessage>): string {
+	let text = "";
+	for (const m of messages) {
+		if (m.role !== "assistant") continue;
+		const content = m.content;
+		if (typeof content === "string") {
+			text = content;
+		} else if (Array.isArray(content)) {
+			text = content
+				.filter((b): b is { type: "text"; text: string } =>
+					!!b && typeof b === "object" && (b as { type?: unknown }).type === "text" && typeof (b as { text?: unknown }).text === "string")
+				.map((b) => b.text)
+				.join("\n");
+		}
+	}
+	return text;
+}
+
+// Build the replies and take their entries out of the queue in one step, so
+// a second agent_end for the same turn cannot submit them again (SIO-1611).
+export function claimTurnReplies<T extends TurnReplyInbound>(queue: Map<string, T>, text: string): TurnReply[] {
+	const replies = buildTurnReplies([...queue.values()], text);
+	for (const reply of replies) {
+		const inbound = queue.get(reply.msg_id);
+		if (inbound) inbound.fulfilled = true;
+		queue.delete(reply.msg_id);
+	}
+	return replies;
+}

@@ -16,7 +16,9 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { buildTurnReplies, outboundHops } from "./turnReply.ts";
+import { claimTurnReplies, lastAssistantText, outboundHops } from "./turnReply.ts";
+import { makeSseParser } from "./sseParser.ts";
+import { reconnectDelay } from "./reconnectBackoff.ts";
 import { buildIdentityNote } from "./identityNote.ts";
 import { formatInbox } from "./inboxFormat.ts";
 import * as fs from "node:fs";
@@ -29,8 +31,6 @@ import * as crypto from "node:crypto";
 const COMS_NET_DIR = path.join(os.homedir(), ".pi", "coms-net");
 const MAX_HOPS = Number(process.env.PI_COMS_NET_MAX_HOPS) || 5;
 const HEARTBEAT_MS = Number(process.env.PI_COMS_NET_HEARTBEAT_MS) || 10_000;
-const RECONNECT_BASE_MS = 500;
-const RECONNECT_MAX_MS = 10_000;
 const MESSAGE_TIMEOUT_MS = Number(process.env.PI_COMS_NET_MESSAGE_TTL_MS) || 1_800_000;
 // The shared duty inbox every monitor reports to; coms_net_inbox reads it by
 // default. A personal inbox is never the intended read (SIO-1618).
@@ -524,45 +524,6 @@ export default function (pi: ExtensionAPI) {
 		return `${t.content}\n\n${note}]`;
 	}
 
-	// ━━ SSE parser (hand-rolled, no dep) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-	function makeSseParser(onEvent: (event: string, data: any, id?: string) => void) {
-		const decoder = new TextDecoder("utf-8");
-		let buf = "";
-		return {
-			feed(chunk: Uint8Array): void {
-				buf += decoder.decode(chunk, { stream: true });
-				let idx;
-				while ((idx = buf.indexOf("\n\n")) >= 0) {
-					const frame = buf.slice(0, idx);
-					buf = buf.slice(idx + 2);
-					let event = "message";
-					const dataLines: string[] = [];
-					let id: string | undefined;
-					for (const line of frame.split("\n")) {
-						if (line.length === 0) continue;
-						if (line.startsWith(":")) continue; // SSE comment
-						if (line.startsWith("event:")) {
-							event = line.slice(6).trimStart();
-						} else if (line.startsWith("data:")) {
-							let v = line.slice(5);
-							if (v.startsWith(" ")) v = v.slice(1);
-							dataLines.push(v);
-						} else if (line.startsWith("id:")) {
-							id = line.slice(3).trimStart();
-						}
-					}
-					if (dataLines.length > 0) {
-						const joined = dataLines.join("\n");
-						let data: any = joined;
-						try { data = JSON.parse(joined); } catch { /* keep as string */ }
-						try { onEvent(event, data, id); } catch { /* ignore handler errors */ }
-					}
-				}
-			},
-		};
-	}
-
 	// ━━ Pool snapshot diff (used to gate widget renders) ━━━━━━━━━━━━━━━━━━━
 
 	function poolSnapshotKey(): string {
@@ -851,13 +812,10 @@ export default function (pi: ExtensionAPI) {
 	function scheduleReconnect(): void {
 		if (shuttingDown) return;
 		if (reconnectTimer) return;
-		// Jitter (0.5x to 1.5x): the hub is a single instance, so after a hub
-		// restart the whole fleet must not retry in lockstep (SIO-1613).
-		const base = Math.min(RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts), RECONNECT_MAX_MS);
-		const backoff = Math.round(base * (0.5 + Math.random()));
+		const { delayMs: backoff, atCeiling } = reconnectDelay(reconnectAttempts);
 		reconnectAttempts++;
 		audit("sse_reconnect_scheduled", { attempt: reconnectAttempts, backoff_ms: backoff });
-		if (base >= RECONNECT_MAX_MS && !notifiedReconnectCap) {
+		if (atCeiling && !notifiedReconnectCap) {
 			notifiedReconnectCap = true;
 			if (currentCtx?.hasUI) {
 				try { currentCtx.ui.notify("coms-net: reconnect backoff at ceiling", "warning"); } catch { /* ignore */ }
@@ -1789,34 +1747,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_end", async (event) => {
 		if (!identity || inboundQueue.size === 0) return;
 
-		// The last assistant text of this run (follow-ups drain inside the run,
-		// so stacked inbound prompts are all answered by the time this fires).
-		let lastAssistantText = "";
-		for (const m of event.messages) {
-			if (m.role !== "assistant") continue;
-			const content: unknown = m.content;
-			if (typeof content === "string") {
-				lastAssistantText = content;
-			} else if (Array.isArray(content)) {
-				lastAssistantText = content
-					.filter((b): b is { type: "text"; text: string } => !!b && b.type === "text" && typeof b.text === "string")
-					.map((b) => b.text)
-					.join("\n");
-			}
-		}
-
-		// A long turn can absorb several stacked inbound prompts (SIO-1598):
-		// every unfulfilled inbound gets this turn's output, oldest first, or
-		// its sender's await times out forever and the stale queue entry
-		// swallows a later turn's reply. Claim the queue entries before any
-		// await so a second agent_end cannot submit the same replies again,
-		// then post them concurrently (SIO-1611).
-		const replies = buildTurnReplies([...inboundQueue.values()], lastAssistantText);
-		for (const reply of replies) {
-			const inbound = inboundQueue.get(reply.msg_id);
-			if (inbound) inbound.fulfilled = true;
-			inboundQueue.delete(reply.msg_id);
-		}
+		// Follow-ups drain inside the run, so every stacked inbound prompt is
+		// answered by this run's final assistant text (SIO-1598). Claim the
+		// queue entries before any await so a second agent_end cannot submit
+		// the same replies again, then post them concurrently (SIO-1611).
+		const replies = claimTurnReplies(inboundQueue, lastAssistantText(event.messages));
 		const project = identity.project;
 		const responderSession = identity.session_id;
 		await Promise.all(replies.map(async (reply) => {
