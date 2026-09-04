@@ -3,6 +3,21 @@
   "private": true,
   "type": "module",
   "description": "Peer-to-peer communication for Pi Coding Agent instances, with multi-account AWS deployment",
+  "version": "0.1.0",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "extensions",
+    "scripts/coms-net-server.ts",
+    "README.md",
+    "docs"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/coms-net.ts"
+    ]
+  },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"
@@ -18,6 +33,22 @@
     "@aws-sdk/client-rds": "^3.1121.0",
     "@aws-sdk/client-sts": "^3.1123.0",
     "zod": "^4.5.4"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "latest",
