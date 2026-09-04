@@ -1,33 +1,10 @@
 // scripts/coms-net-server.ts
-//
-// coms-net Bun HTTP/SSE hub server (v1).
-//
-// Implements the protocol defined in specs/coms-net-v1.md.
-//
-// Hard rules:
-// - Entrypoint guard: Bun.serve boot lives inside main(); only fires when
-//   `import.meta.main` is true. `bun -e "import('...')"` must NOT start the server.
-// - Token policy:
-//     * PI_COMS_NET_AUTH_TOKEN set -> use it; do NOT write server.secret.json.
-//     * Loopback bind w/o env token -> generate random, write server.secret.json (0600).
-//     * Non-loopback bind w/o env token -> fail startup (exit 1).
-// - Never log the auth token. Print only the *path* to server.secret.json.
-// - crypto.timingSafeEqual is length-guarded.
-// - Atomic writes via .tmp + renameSync.
-// - SIGINT/SIGTERM unlinks server.json (always best-effort) and server.secret.json
-//   only if TOKEN_FILE_OWNED_BY_US is true.
-// - Status state machine: queued | delivered | complete | error | timeout.
-//   No `in_progress` (dropped from v1).
 
 import { Database } from "bun:sqlite";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Env-var reads (module scope; all tunables here)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const HOST = process.env.PI_COMS_NET_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.PI_COMS_NET_PORT ?? 0);
@@ -64,15 +41,9 @@ const DEFAULT_AWAIT_TIMEOUT_MS = 30_000;
 let TOKEN: string = ENV_TOKEN ?? "";
 let TOKEN_FILE_OWNED_BY_US = false;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Console event logger
-// ─────────────────────────────────────────────────────────────────────────────
 // Concise, color-coded per-event lines so the operator can watch what's
 // flowing through the hub. Uses ANSI 24-bit colors when stdout is a TTY,
 // otherwise plain ASCII. Auth tokens NEVER appear here.
-//
-// Format: HH:MM:SS.sss <symbol> <kind:10> <detail>
-//
 // Set PI_COMS_NET_LOG_HEARTBEAT=1 to also see heartbeats (very chatty).
 // Set PI_COMS_NET_LOG_QUIET=1 to suppress everything except startup/shutdown.
 
@@ -162,11 +133,8 @@ function logRejected(reason: string, detail: string): void {
 	logLine("✗", C_YELLOW, "rejected", `${reason} ${dim(detail)}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared types (paste into both server and client per spec)
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type AgentStatus = "online" | "stale" | "offline";
+// No in_progress state: dropped from v1.
 export type MessageStatus = "queued" | "delivered" | "complete" | "error" | "timeout";
 
 export type AgentCard = {
@@ -269,7 +237,6 @@ export type ResponseSubmitRequest = {
 
 export type ErrorResponse = { ok: false; error: string; details?: unknown };
 
-// SSE writer & per-project state
 type Awaiter = {
 	resolve: (m: ComsMessage) => void;
 	timer: ReturnType<typeof setTimeout> | null;
@@ -295,10 +262,6 @@ type ServerState = {
 	started_at: string;
 	projects: Map<string, ProjectState>;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers (module scope, all pure / deterministic)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -333,14 +296,13 @@ export function isLoopback(host: string): boolean {
 	return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
+// timingSafeEqual throws on unequal lengths, so guard first.
 export function tokensEqual(a: string, b: string): boolean {
 	const ab = Buffer.from(a, "utf-8");
 	const bb = Buffer.from(b, "utf-8");
 	if (ab.length !== bb.length) return false;
 	return crypto.timingSafeEqual(ab, bb);
 }
-
-// ── Per-principal auth (SIO-1577) ───────────────────────────────────────────
 
 export type AuthPrincipal = { principal: string; kind: string; names: string[] };
 type AuthResult = { principal: AuthPrincipal; token_hash: string | null };
@@ -446,9 +408,7 @@ async function refreshTokenDirectory(): Promise<void> {
 				if (w) {
 					try {
 						w.close();
-					} catch {
-						/* noop */
-					}
+					} catch {}
 					p.streams.delete(sid);
 				}
 				p.agents.delete(sid);
@@ -533,6 +493,7 @@ function ensureDirSync(dir: string): void {
 	fs.mkdirSync(dir, { recursive: true });
 }
 
+// Write to .tmp and rename so readers never see a partially written file.
 function atomicWriteSync(filePath: string, content: string, mode?: number): void {
 	const dir = path.dirname(filePath);
 	ensureDirSync(dir);
@@ -541,9 +502,7 @@ function atomicWriteSync(filePath: string, content: string, mode?: number): void
 	if (mode !== undefined) {
 		try {
 			fs.chmodSync(tmp, mode);
-		} catch {
-			// best-effort
-		}
+		} catch {}
 	}
 	fs.renameSync(tmp, filePath);
 }
@@ -562,10 +521,6 @@ export function resolveUniqueName(project: ProjectState, desiredName: string): s
 	while (liveNames.has(`${desiredName}${n}`)) n++;
 	return `${desiredName}${n}`;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Mailbox (bun:sqlite write-through; the in-memory map stays the hot path)
-// ─────────────────────────────────────────────────────────────────────────────
 
 // One row of the messages table as sqlite returns it (JSON columns still text).
 type MessageRow = {
@@ -603,6 +558,7 @@ type InboxRow = Pick<
 	| "completed_at"
 >;
 
+// Write-through store; the in-memory map stays the hot path.
 export class MailStore {
 	private db: Database;
 	constructor(dbPath: string) {
@@ -752,15 +708,9 @@ export class MailStore {
 	close(): void {
 		try {
 			this.db.close();
-		} catch {
-			// noop
-		}
+		} catch {}
 	}
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// State (module scope, single instance shared by router & loops)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const state: ServerState = {
 	server_id: ulid(),
@@ -870,7 +820,6 @@ function flushQueuedMail(p: ProjectState, projectName: string, sessionId: string
 	const entry = p.agents.get(sessionId);
 	if (!entry) return;
 	const mail = mailFor(projectName);
-	// Claim name-addressed mail for this session.
 	for (const m of p.messages.values()) {
 		if (m.status === "queued" && m.target_session === null && m.target_name === entry.name) {
 			m.target_session = sessionId;
@@ -936,9 +885,7 @@ function releaseAwaiters(p: ProjectState, msg_id: string): void {
 		if (a.timer) clearTimeout(a.timer);
 		try {
 			if (message) a.resolve(message);
-		} catch {
-			// noop
-		}
+		} catch {}
 	}
 	p.awaiters.delete(msg_id);
 }
@@ -986,10 +933,6 @@ function inboxDepthFor(p: ProjectState, targetSession: string): number {
 	}
 	return n;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Route handlers
-// ─────────────────────────────────────────────────────────────────────────────
 
 async function handleHealth(_req: Request): Promise<Response> {
 	return json({
@@ -1140,14 +1083,11 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 			if (old && old !== writer) {
 				try {
 					old.close();
-				} catch {
-					// noop
-				}
+				} catch {}
 			}
 			p.streams.set(session_id, writer);
 			logSseOpen(entry.name, p.streams.size);
 
-			// hello
 			const helloId = ++writer.lastId;
 			try {
 				controller.enqueue(
@@ -1157,7 +1097,6 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 				closed = true;
 			}
 
-			// pool_snapshot
 			const agents: AgentCard[] = [];
 			for (const a of p.agents.values()) {
 				if (a.session_id === session_id) continue;
@@ -1171,10 +1110,8 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 				closed = true;
 			}
 
-			// Mailbox: flush queued messages for this session, oldest first.
 			flushQueuedMail(p, projectName, session_id);
 
-			// abort handler
 			const onAbort = () => {
 				if (closed) return;
 				closed = true;
@@ -1182,9 +1119,7 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 				if (cur === writer) p.streams.delete(session_id);
 				try {
 					controller.close();
-				} catch {
-					// noop
-				}
+				} catch {}
 				const left = p.agents.get(session_id);
 				if (left) {
 					logSseClose(left.name, "connection_closed");
@@ -1203,9 +1138,7 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 			};
 			try {
 				req.signal.addEventListener("abort", onAbort);
-			} catch {
-				// noop
-			}
+			} catch {}
 		},
 		cancel() {
 			const cur = p.streams.get(session_id);
@@ -1327,7 +1260,6 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 		typeof body.ttl_ms === "number" && body.ttl_ms > 0 ? Math.min(body.ttl_ms, MAX_TTL_MS) : MESSAGE_TTL_MS;
 	const isMailbox = requestedTtl > MESSAGE_TTL_MS;
 
-	// Resolve target.
 	let target: RegistryEntry | undefined;
 	if (body.target_session && typeof body.target_session === "string") {
 		target = p.agents.get(body.target_session);
@@ -1338,7 +1270,6 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 	} else {
 		const desired = (body.target ?? "").trim();
 		if (!desired) return errorJson("missing_target", 400);
-		// Direct session_id match first.
 		const directSid = p.agents.get(desired);
 		if (directSid) {
 			target = directSid;
@@ -1400,7 +1331,6 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 		}
 	}
 
-	// Inbox cap.
 	const depth = inboxDepthFor(p, target.session_id);
 	if (depth >= MAX_INBOX) {
 		logRejected("inbox_full", `${sender.name} → ${target.name} depth=${depth}`);
@@ -1431,13 +1361,11 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 	p.messages.set(msg.msg_id, msg);
 	mailFor(projectName).upsert(msg);
 
-	// Notify sender: queued
 	sendToStream(p, body.sender_session, "message_status", {
 		msg_id: msg.msg_id,
 		status: "queued",
 	});
 
-	// Emit prompt to target if its stream is open.
 	const targetWriter = p.streams.get(target.session_id);
 	if (targetWriter) {
 		sendToStream(p, target.session_id, "prompt", {
@@ -1457,7 +1385,6 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 		msg.status = "delivered";
 		msg.delivered_at = nowIso();
 		mailFor(projectName).upsert(msg);
-		// Notify sender: delivered
 		sendToStream(p, body.sender_session, "message_status", {
 			msg_id: msg.msg_id,
 			status: "delivered",
@@ -1531,7 +1458,6 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 			headers: { "content-type": "application/json" },
 		});
 	}
-	// Already terminal? Resolve immediately.
 	if (msg.status === "complete" || msg.status === "error" || msg.status === "timeout") {
 		return json({
 			msg_id: msg.msg_id,
@@ -1543,7 +1469,6 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 
 	const requested = Number(url.searchParams.get("timeout_ms") ?? "");
 	let timeout_ms = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_AWAIT_TIMEOUT_MS;
-	// Clamp to TTL.
 	if (timeout_ms > MESSAGE_TTL_MS) timeout_ms = MESSAGE_TTL_MS;
 
 	const proj = project; // for closure
@@ -1601,13 +1526,10 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 				}, timeout_ms);
 				try {
 					awaiter.timer.unref();
-				} catch {
-					// noop
-				}
+				} catch {}
 
 				set.add(awaiter);
 
-				// Connection abort: clean the awaiter.
 				try {
 					req.signal.addEventListener("abort", () => {
 						if (done) return;
@@ -1620,13 +1542,9 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 						done = true;
 						try {
 							controller.close();
-						} catch {
-							// noop
-						}
+						} catch {}
 					});
-				} catch {
-					// noop
-				}
+				} catch {}
 			},
 		}),
 		{
@@ -1678,7 +1596,6 @@ async function handleSubmitResponse(req: Request, msg_id: string, auth: AuthResu
 
 	const responderName = responder?.name ?? "unknown";
 
-	// Notify sender (if its stream is open).
 	sendToStream(project, msg.sender_session, "response", {
 		msg_id: msg.msg_id,
 		project: msg.project,
@@ -1717,9 +1634,7 @@ function handleDeleteAgent(_req: Request, url: URL, sessionId: string, auth: Aut
 	if (stream) {
 		try {
 			stream.close();
-		} catch {
-			// noop
-		}
+		} catch {}
 		p.streams.delete(sessionId);
 	}
 
@@ -1744,10 +1659,6 @@ function handleDeleteAgent(_req: Request, url: URL, sessionId: string, auth: Aut
 	return json({ ok: true });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Router
-// ─────────────────────────────────────────────────────────────────────────────
-
 async function router(req: Request): Promise<Response> {
 	let url: URL;
 	try {
@@ -1758,47 +1669,38 @@ async function router(req: Request): Promise<Response> {
 	const method = req.method.toUpperCase();
 	const pathname = url.pathname;
 
-	// 1. /health (no auth)
 	if (pathname === "/health" && method === "GET") {
 		return handleHealth(req);
 	}
 
-	// All /v1/* require bearer auth.
 	let auth: AuthResult | null = null;
 	if (pathname.startsWith("/v1/")) {
 		auth = authenticate(req);
 		if (!auth) return unauthorized();
 	} else {
-		// Unknown non-/v1 route.
 		return errorJson("not_found", 404);
 	}
 
-	// 2. POST /v1/agents/register
 	if (pathname === "/v1/agents/register" && method === "POST") {
 		return handleRegister(req, auth);
 	}
 
-	// 3. GET /v1/events
 	if (pathname === "/v1/events" && method === "GET") {
 		return handleEvents(req, url, auth);
 	}
 
-	// 5. GET /v1/agents
 	if (pathname === "/v1/agents" && method === "GET") {
 		return handleListAgents(req, url);
 	}
 
-	// 6. POST /v1/messages
 	if (pathname === "/v1/messages" && method === "POST") {
 		return handleSendMessage(req, auth);
 	}
 
-	// 7. GET /v1/mailbox (durable inbox, read-many)
 	if (pathname === "/v1/mailbox" && method === "GET") {
 		return handleInbox(req, url);
 	}
 
-	// /v1/agents/:session_id/heartbeat (POST) and DELETE /v1/agents/:session_id
 	const agentMatch = pathname.match(/^\/v1\/agents\/([^/]+)(?:\/(heartbeat))?$/);
 	if (agentMatch) {
 		const sessionId = decodeURIComponent(agentMatch[1]);
@@ -1812,7 +1714,6 @@ async function router(req: Request): Promise<Response> {
 		return errorJson("method_not_allowed", 405);
 	}
 
-	// /v1/messages/:id, /v1/messages/:id/await, /v1/messages/:id/response
 	const msgMatch = pathname.match(/^\/v1\/messages\/([^/]+)(?:\/(await|response))?$/);
 	if (msgMatch) {
 		const msg_id = decodeURIComponent(msgMatch[1]);
@@ -1832,10 +1733,6 @@ async function router(req: Request): Promise<Response> {
 	return errorJson("not_found", 404);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cleanup loops (Phase 3)
-// ─────────────────────────────────────────────────────────────────────────────
-
 let staleScanTimer: ReturnType<typeof setInterval> | null = null;
 let ttlScanTimer: ReturnType<typeof setInterval> | null = null;
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
@@ -1849,16 +1746,13 @@ function staleScanTick(): void {
 			if (Number.isNaN(last)) continue;
 			const dt = now - last;
 			if (dt > OFFLINE_AFTER_MS) {
-				// Remove agent, close stream, emit agent_left.
 				p.agents.delete(sid);
 				nameIndexRemove(p, entry.name, sid);
 				const stream = p.streams.get(sid);
 				if (stream) {
 					try {
 						stream.close();
-					} catch {
-						// noop
-					}
+					} catch {}
 					p.streams.delete(sid);
 				}
 				failDeliveredMail(p, projectName, sid, entry.name, "stale");
@@ -1952,16 +1846,12 @@ function startLoops(): void {
 		}, AUTH_REFRESH_MS);
 		try {
 			authRefreshTimer.unref();
-		} catch {
-			// noop
-		}
+		} catch {}
 	}
 	for (const t of [staleScanTimer, ttlScanTimer, keepaliveTimer]) {
 		try {
 			t.unref();
-		} catch {
-			// noop
-		}
+		} catch {}
 	}
 }
 
@@ -1976,10 +1866,6 @@ function stopLoops(): void {
 	authRefreshTimer = null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// main() — only runs when launched directly
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function main(): Promise<void> {
 	// Token policy. Directory mode needs no shared token: the directory is the
 	// perimeter, and PI_COMS_NET_AUTH_TOKEN (if set) is just the root principal.
@@ -1988,6 +1874,7 @@ export async function main(): Promise<void> {
 			console.error(`coms-net: refusing to bind ${HOST} without an explicit PI_COMS_NET_AUTH_TOKEN.`);
 			process.exit(1);
 		}
+		// A random token is only ever generated for a loopback bind.
 		TOKEN = crypto.randomBytes(32).toString("hex");
 		TOKEN_FILE_OWNED_BY_US = true;
 	} else {
@@ -2012,7 +1899,6 @@ export async function main(): Promise<void> {
 	// messages.db. New server_id, same mail.
 	recoverMail();
 
-	// Boot Bun.serve.
 	const server = Bun.serve({
 		hostname: HOST,
 		port: PORT,
@@ -2048,9 +1934,7 @@ export async function main(): Promise<void> {
 		atomicWriteSync(secretPath, JSON.stringify({ token: TOKEN }, null, 2), 0o600);
 		try {
 			fs.chmodSync(secretPath, 0o600);
-		} catch {
-			// best-effort
-		}
+		} catch {}
 	}
 
 	// Boot banner — NEVER print the token. Path only.
@@ -2071,7 +1955,6 @@ export async function main(): Promise<void> {
 		);
 	}
 
-	// Start cleanup loops.
 	startLoops();
 
 	// Synchronous unlink helper — must be safe to call multiple times and from any
@@ -2082,19 +1965,15 @@ export async function main(): Promise<void> {
 		filesUnlinked = true;
 		try {
 			fs.unlinkSync(serverJsonPath);
-		} catch {
-			// noop
-		}
+		} catch {}
+		// Never delete a secret file this process did not write.
 		if (TOKEN_FILE_OWNED_BY_US && secretPath) {
 			try {
 				fs.unlinkSync(secretPath);
-			} catch {
-				// noop
-			}
+			} catch {}
 		}
 	};
 
-	// Signal handlers.
 	const shutdown = (sig: string) => {
 		if (shuttingDown) return;
 		shuttingDown = true;
@@ -2105,10 +1984,7 @@ export async function main(): Promise<void> {
 		unlinkStateFiles();
 		try {
 			console.log(`coms-net: ${sig} received, shutting down`);
-		} catch {
-			// noop
-		}
-		// Notify all streams.
+		} catch {}
 		for (const [projectName, p] of state.projects) {
 			for (const [sid, entry] of p.agents) {
 				broadcast(
@@ -2126,20 +2002,14 @@ export async function main(): Promise<void> {
 			for (const [, w] of p.streams) {
 				try {
 					w.close();
-				} catch {
-					// noop
-				}
+				} catch {}
 			}
 			p.streams.clear();
 		}
-		// Stop loops.
 		stopLoops();
-		// Stop server.
 		try {
 			server.stop?.(true);
-		} catch {
-			// noop
-		}
+		} catch {}
 		// Allow IO to flush.
 		setTimeout(() => process.exit(0), 50).unref?.();
 	};
@@ -2154,6 +2024,7 @@ export async function main(): Promise<void> {
 	});
 }
 
+// Importing this module must not start the server.
 if (import.meta.main) {
 	void main();
 }

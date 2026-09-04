@@ -1,8 +1,4 @@
 // tests/sse-reconnect.integration.test.ts
-//
-// A client that reopens its SSE stream (reconnect) replaces the old stream on
-// the hub. Peers must not see an agent_left for a session that is still
-// registered and streaming; a real disconnect still announces exactly one.
 import { afterEach, expect, test } from "bun:test";
 import { activeHubs, readSseEvents, register, startHub, stopHub, TOKEN } from "./harness";
 

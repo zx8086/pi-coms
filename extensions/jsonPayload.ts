@@ -1,4 +1,4 @@
-// extensions/jsonPayload.ts -- shared module (not an extension), no deps
+// extensions/jsonPayload.ts
 
 // Schema-constrained replies rarely arrive as bare JSON: models wrap the
 // payload in a markdown fence or add prose around it. Try strict parse, then
@@ -8,16 +8,12 @@ export function extractJsonPayload(text: string): unknown {
 	const t = text.trim();
 	try {
 		return JSON.parse(t);
-	} catch {
-		/* fall through */
-	}
+	} catch {}
 	const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
 	if (fence) {
 		try {
 			return JSON.parse(fence[1].trim());
-		} catch {
-			/* fall through */
-		}
+		} catch {}
 	}
 	for (const open of ["{", "["] as const) {
 		const close = open === "{" ? "}" : "]";
@@ -41,9 +37,7 @@ export function extractJsonPayload(text: string): unknown {
 				if (depth === 0) {
 					try {
 						return JSON.parse(t.slice(start, i + 1));
-					} catch {
-						/* try the other delimiter */
-					}
+					} catch {}
 					break;
 				}
 			}

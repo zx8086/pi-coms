@@ -1,8 +1,4 @@
 // tests/hub-validation.integration.test.ts
-//
-// Single-token hub: project-name validation, no store creation for unknown
-// projects, request body cap, and the shared-token regression guard for
-// session ownership (every caller is the same principal).
 import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";

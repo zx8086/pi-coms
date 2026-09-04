@@ -22,9 +22,7 @@ export class MonitorState {
 	close(): void {
 		try {
 			this.db.close();
-		} catch {
-			// noop
-		}
+		} catch {}
 	}
 
 	getWatermark(key: string): number | null {

@@ -1,7 +1,4 @@
 // tests/harness.ts
-//
-// Shared integration-test harness: spawns the real hub server with HOME
-// pointed at a temp dir so registry and mailbox state stay isolated.
 import { expect } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";

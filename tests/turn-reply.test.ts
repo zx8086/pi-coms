@@ -1,9 +1,4 @@
 // tests/turn-reply.test.ts
-//
-// SIO-1598: when several inbound prompts stack up during one long turn,
-// agent_end must reply to every unfulfilled inbound, not just the newest --
-// the older senders' awaits otherwise time out forever and the stale queue
-// entries swallow later turns' output.
 import { expect, test } from "bun:test";
 import { buildTurnReplies, outboundHops } from "../extensions/turnReply";
 
