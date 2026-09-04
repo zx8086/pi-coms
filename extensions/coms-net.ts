@@ -13,6 +13,7 @@
 //   pi -e extensions/coms-net.ts --server-url http://host:port --auth-token <tok> --cname planner
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -131,10 +132,12 @@ interface InboundContext {
 	fulfilled: boolean;
 }
 
+type ReplyResult = { response?: any; error?: string | null };
+
 interface PendingReply {
-	resolve: (value: { response?: any; error?: string | null }) => void;
-	promise: Promise<{ response?: any; error?: string | null }>;
-	result?: { response?: any; error?: string | null };
+	resolve: (value: ReplyResult) => void;
+	promise: Promise<ReplyResult>;
+	result?: ReplyResult;
 	target_name?: string;
 	target_session?: string | null;
 	created_at: string;
@@ -455,25 +458,22 @@ export default function (pi: ExtensionAPI) {
 			headers["Content-Type"] = "application/json";
 			init.body = JSON.stringify(body);
 		}
-		// Timeout via AbortController unless caller passed their own signal.
-		let timer: any = null;
+		// Timeout via AbortController. A caller's signal (tool abort from Esc,
+		// shutdown) is combined with the timeout rather than replacing it.
 		const ac = new AbortController();
 		const timeoutMs = opts?.timeoutMs ?? HTTP_TIMEOUT_MS;
-		if (opts?.signal) {
-			init.signal = opts.signal;
-		} else {
-			init.signal = ac.signal;
-			timer = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, timeoutMs);
-			try { (timer as any).unref?.(); } catch { /* ignore */ }
-		}
+		const timer = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, timeoutMs);
+		try { (timer as any).unref?.(); } catch { /* ignore */ }
+		init.signal = opts?.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal;
 		let resp: Response;
 		try {
 			resp = await fetch(url, init);
 		} catch (err: any) {
-			if (timer) { try { clearTimeout(timer); } catch { /* ignore */ } }
+			try { clearTimeout(timer); } catch { /* ignore */ }
+			if (opts?.signal?.aborted) throw new Error("coms-net: cancelled");
 			throw new Error(`coms-net: fetch failed: ${err?.message ?? String(err)}`);
 		}
-		if (timer) { try { clearTimeout(timer); } catch { /* ignore */ } }
+		try { clearTimeout(timer); } catch { /* ignore */ }
 		const text = await resp.text();
 		let parsed: any = null;
 		if (text.length > 0) {
@@ -502,6 +502,27 @@ export default function (pi: ExtensionAPI) {
 		if (!authToken) return msg;
 		// Defense in depth: never leak the bearer.
 		return msg.split(authToken).join("<redacted>");
+	}
+
+	// ━━ Tool output cap ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+	// Peer replies and inbox bodies are unbounded; what reaches the model is
+	// not (pi's own tools stop at 50 KB / 2000 lines). Past the cap the full
+	// text goes to a temp file the model can read on demand.
+	function clampToolText(text: string, label: string): string {
+		const t = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+		if (!t.truncated) return text;
+		let note =
+			`[Output truncated: ${t.outputLines} of ${t.totalLines} lines ` +
+			`(${formatSize(t.outputBytes)} of ${formatSize(t.totalBytes)}).`;
+		try {
+			const dir = path.join(os.tmpdir(), "pi-coms-net");
+			fs.mkdirSync(dir, { recursive: true });
+			const file = path.join(dir, `${label.replace(/[^A-Za-z0-9_.-]/g, "_")}-${ulid()}.txt`);
+			fs.writeFileSync(file, text, "utf-8");
+			note += ` Full output saved to: ${file}`;
+		} catch { /* the truncated text still stands on its own */ }
+		return `${t.content}\n\n${note}]`;
 	}
 
 	// ━━ SSE parser (hand-rolled, no dep) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1188,6 +1209,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "coms_net_list",
 		label: "Coms Net List",
+		promptSnippet: "List peer agents on the coms-net hub with their model and context usage",
 		description:
 			"List peer agents on the coms-net hub for the current project. Returns names, models, and live context-window usage. " +
 			"Set include_explicit=true to reveal agents launched with --explicit.",
@@ -1195,14 +1217,14 @@ export default function (pi: ExtensionAPI) {
 			project: Type.Optional(Type.String({ description: "Project name (defaults to caller's project)." })),
 			include_explicit: Type.Optional(Type.Boolean({ description: "Include agents launched with --explicit. Default false." })),
 		}),
-		async execute(_callId, params) {
+		async execute(_callId, params, signal) {
 			if (!identity) {
 				throw new Error("coms-net not initialised");
 			}
 			const projectFilter = (params as any).project ?? identity.project;
 			const includeExp = (params as any).include_explicit === true;
 			const qs = `?project=${encodeURIComponent(projectFilter)}&include_explicit=${includeExp ? "true" : "false"}`;
-			const resp = await httpFetch("GET", `/v1/agents${qs}`);
+			const resp = await httpFetch("GET", `/v1/agents${qs}`, undefined, { signal });
 			const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
 			const peers = agents.filter(a => a.session_id !== identity!.session_id);
 
@@ -1248,6 +1270,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "coms_net_send",
 		label: "Coms Net Send",
+		promptSnippet: "Start a new conversation with one peer agent; returns a msg_id to poll or await",
+		promptGuidelines: [
+			"Never call coms_net_send to reply to an inbound coms-net message. Reply with a normal assistant message; the extension returns your final text to the sender automatically.",
+		],
 		description:
 			"INITIATE a new outbound message to a peer agent on the coms-net hub. " +
 			"Returns synchronously with a msg_id once the server queues the prompt. " +
@@ -1360,6 +1386,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "coms_net_get",
 		label: "Coms Net Get",
+		promptSnippet: "Non-blocking poll for the reply to your own coms_net_send",
+		promptGuidelines: [
+			"Only pass coms_net_get or coms_net_await a msg_id returned by your own coms_net_send, never a msg_id quoted in an inbound coms-net message.",
+		],
 		description:
 			"Non-blocking poll of a reply to YOUR OWN coms_net_send. Returns status pending|complete|error and (when complete) the response. " +
 			"Same caveat as coms_net_await: only use msg_ids you got back from coms_net_send, never msg_ids from an inbound `[from <peer>] …` prompt — " +
@@ -1367,7 +1397,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			msg_id: Type.String({ description: "msg_id returned by coms_net_send." }),
 		}),
-		async execute(_callId, params) {
+		async execute(_callId, params, signal) {
 			const msg_id = (params as any).msg_id as string;
 			// Local SSE-resolved fast path.
 			const pending = pendingReplies.get(msg_id);
@@ -1377,14 +1407,14 @@ export default function (pi: ExtensionAPI) {
 					? `coms_net_get: error — ${r.error}`
 					: `coms_net_get: complete\n${typeof r.response === "string" ? r.response : JSON.stringify(r.response, null, 2)}`;
 				return {
-					content: [{ type: "text" as const, text }],
+					content: [{ type: "text" as const, text: clampToolText(text, `get-${msg_id}`) }],
 					details: { status: "complete", response: r.response, error: r.error ?? null },
 				};
 			}
 			// Fall back to server.
 			let resp: any;
 			try {
-				resp = await httpFetch("GET", `/v1/messages/${encodeURIComponent(msg_id)}`);
+				resp = await httpFetch("GET", `/v1/messages/${encodeURIComponent(msg_id)}`, undefined, { signal });
 			} catch (err) {
 				if (err instanceof HttpError && err.status === 404) {
 					return {
@@ -1403,7 +1433,7 @@ export default function (pi: ExtensionAPI) {
 					? `coms_net_get: ${status} — ${resp.error}`
 					: `coms_net_get: ${status}\n${typeof resp.response === "string" ? resp.response : JSON.stringify(resp.response, null, 2)}`;
 				return {
-					content: [{ type: "text" as const, text }],
+					content: [{ type: "text" as const, text: clampToolText(text, `get-${msg_id}`) }],
 					details: { status, response: resp.response, error: resp.error ?? null },
 				};
 			}
@@ -1432,6 +1462,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "coms_net_inbox",
 		label: "Coms Net Inbox",
+		promptSnippet: "Read the shared durable inbox (monitor reports, mail) or a peer's conversation history",
+		promptGuidelines: [
+			"Use coms_net_inbox to read monitor reports and other mailbox messages; they arrive as a passive notice and are never delivered as prompts.",
+		],
 		description:
 			"Read a durable inbox: long-TTL mailbox messages (e.g. monitor reports) are retained on the hub until their TTL expires and stay readable by everyone. " +
 			"Non-destructive and identical for every reader, so any operator connecting at any time sees the same messages on demand. " +
@@ -1445,7 +1479,7 @@ export default function (pi: ExtensionAPI) {
 			since: Type.Optional(Type.String({ description: "Only messages newer than this msg_id (ascending)." })),
 			msg_id: Type.Optional(Type.String({ description: "Return only this message, with its full untruncated body." })),
 		}),
-		async execute(_callId, params) {
+		async execute(_callId, params, signal) {
 			if (!identity) throw new Error("coms-net not initialised");
 			const name = ((params as any).name as string | undefined) || INBOX_NAME;
 			const msgId = (params as any).msg_id as string | undefined;
@@ -1459,7 +1493,7 @@ export default function (pi: ExtensionAPI) {
 			const qs =
 				`?project=${encodeURIComponent(identity.project)}&name=${encodeURIComponent(name)}&limit=${limit}` +
 				(since ? `&since=${encodeURIComponent(since)}` : "");
-			const resp = await httpFetch("GET", `/v1/mailbox${qs}`);
+			const resp = await httpFetch("GET", `/v1/mailbox${qs}`, undefined, { signal });
 			const messages: any[] = Array.isArray(resp?.messages) ? resp.messages : [];
 			const text = formatInbox(
 				name,
@@ -1475,7 +1509,7 @@ export default function (pi: ExtensionAPI) {
 				{ msgId },
 			);
 			return {
-				content: [{ type: "text" as const, text }],
+				content: [{ type: "text" as const, text: clampToolText(text, `inbox-${name}`) }],
 				details: { name, count: messages.length, messages },
 			};
 		},
@@ -1498,6 +1532,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "coms_net_await",
 		label: "Coms Net Await",
+		promptSnippet: "Block until the reply to your own coms_net_send arrives (default 30 min)",
+		promptGuidelines: [
+			"When coms_net_await or coms_net_broadcast targets a prompt that makes the peer investigate, keep the default timeout or set minutes, not seconds; replies only arrive when the peer's whole turn ends.",
+		],
 		description:
 			"Block until the reply to YOUR OWN outbound coms_net_send arrives, or the timeout fires (default 30 min). " +
 			"Only call this with a msg_id that YOU received as the return value of a coms_net_send call you just made.\n\n" +
@@ -1512,71 +1550,23 @@ export default function (pi: ExtensionAPI) {
 			msg_id: Type.String({ description: "msg_id returned by coms_net_send." }),
 			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Server cap applies. Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends." })),
 		}),
-		async execute(_callId, params) {
+		async execute(_callId, params, signal) {
 			const msg_id = (params as any).msg_id as string;
 			const timeoutMs = typeof (params as any).timeout_ms === "number" && (params as any).timeout_ms > 0
 				? (params as any).timeout_ms
 				: MESSAGE_TIMEOUT_MS;
 
-			// Local SSE-resolved fast path.
-			const pending = pendingReplies.get(msg_id);
-			if (pending && pending.result) {
-				const r = pending.result;
-				if (r.error) {
-					return {
-						content: [{ type: "text" as const, text: `coms_net_await: error — ${r.error}` }],
-						details: { error: r.error },
-					};
-				}
-				const resp = r.response;
+			const r = await awaitReplyResult(msg_id, timeoutMs, signal);
+			if (r.error) {
 				return {
-					content: [{ type: "text" as const, text: typeof resp === "string" ? resp : JSON.stringify(resp, null, 2) }],
-					details: { response: resp },
+					content: [{ type: "text" as const, text: `coms_net_await: error — ${r.error}` }],
+					details: { error: r.error },
 				};
 			}
-
-			// Race local pending promise against server long-poll, capped at timeoutMs.
-			const localPromise: Promise<{ response?: any; error?: string | null }> = pending
-				? pending.promise
-				: new Promise(() => { /* never resolves on its own; SSE will */ });
-
-			// Server long-poll. Cap server timeout to the requested timeout (server enforces its own max too).
-			const serverTimeoutMs = Math.min(timeoutMs, MESSAGE_TIMEOUT_MS);
-			const ac = new AbortController();
-			const serverPromise = httpFetch(
-				"GET",
-				`/v1/messages/${encodeURIComponent(msg_id)}/await?timeout_ms=${serverTimeoutMs}`,
-				undefined,
-				{ timeoutMs: serverTimeoutMs + 5_000, signal: ac.signal },
-			).then((data: any) => {
-				if (data?.status === "complete") return { response: data.response, error: null };
-				if (data?.status === "error") return { response: null, error: data.error ?? "error" };
-				if (data?.status === "timeout") return { response: null, error: "timeout" };
-				return { response: data?.response, error: data?.error ?? null };
-			}).catch((err) => {
-				if (err instanceof HttpError && err.status === 404) {
-					return { response: null, error: "unknown msg_id" };
-				}
-				return { response: null, error: safeError(err) };
-			});
-
-			const timeoutPromise = new Promise<{ error: string }>((resolve) => {
-				const t = setTimeout(() => resolve({ error: "timeout" }), timeoutMs);
-				try { (t as any).unref?.(); } catch { /* ignore */ }
-			});
-
-			const winner = await Promise.race([localPromise, serverPromise, timeoutPromise]);
-			try { ac.abort(); } catch { /* ignore */ }
-
-			if ((winner as any).error) {
-				return {
-					content: [{ type: "text" as const, text: `coms_net_await: error — ${(winner as any).error}` }],
-					details: { error: (winner as any).error },
-				};
-			}
-			const resp = (winner as any).response;
+			const resp = r.response;
+			const text = typeof resp === "string" ? resp : JSON.stringify(resp, null, 2);
 			return {
-				content: [{ type: "text" as const, text: typeof resp === "string" ? resp : JSON.stringify(resp, null, 2) }],
+				content: [{ type: "text" as const, text: clampToolText(text, `await-${msg_id}`) }],
 				details: { response: resp },
 			};
 		},
@@ -1594,19 +1584,22 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// Shared await used by broadcast: race the SSE-resolved local promise
-	// against the server long-poll, capped at timeoutMs. Mirrors coms_net_await.
-	async function awaitReplyResult(msg_id: string, timeoutMs: number): Promise<{ response?: any; error?: string | null }> {
+	// Shared by coms_net_await and coms_net_broadcast: race the SSE-resolved
+	// local promise against the server long-poll, capped at timeoutMs. The tool
+	// abort signal (Esc) ends the wait early; the pending entry and the hub copy
+	// survive, so coms_net_get still finds the reply afterwards.
+	async function awaitReplyResult(msg_id: string, timeoutMs: number, signal?: AbortSignal): Promise<ReplyResult> {
 		const pending = pendingReplies.get(msg_id);
 		if (pending && pending.result) return pending.result;
+		if (signal?.aborted) return { response: null, error: "cancelled" };
 
-		const localPromise: Promise<{ response?: any; error?: string | null }> = pending
+		const localPromise: Promise<ReplyResult> = pending
 			? pending.promise
 			: new Promise(() => { /* never resolves on its own; SSE will */ });
 
 		const serverTimeoutMs = Math.min(timeoutMs, MESSAGE_TIMEOUT_MS);
 		const ac = new AbortController();
-		const serverPromise = httpFetch(
+		const serverPromise: Promise<ReplyResult> = httpFetch(
 			"GET",
 			`/v1/messages/${encodeURIComponent(msg_id)}/await?timeout_ms=${serverTimeoutMs}`,
 			undefined,
@@ -1623,19 +1616,35 @@ export default function (pi: ExtensionAPI) {
 			return { response: null, error: safeError(err) };
 		});
 
-		const timeoutPromise = new Promise<{ error: string }>((resolve) => {
-			const t = setTimeout(() => resolve({ error: "timeout" }), timeoutMs);
-			try { (t as any).unref?.(); } catch { /* ignore */ }
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		const timeoutPromise = new Promise<ReplyResult>((resolve) => {
+			timer = setTimeout(() => resolve({ response: null, error: "timeout" }), timeoutMs);
+			try { (timer as any).unref?.(); } catch { /* ignore */ }
 		});
 
-		const winner = await Promise.race([localPromise, serverPromise, timeoutPromise]);
-		try { ac.abort(); } catch { /* ignore */ }
-		return winner as { response?: any; error?: string | null };
+		let onAbort: (() => void) | null = null;
+		const abortPromise = new Promise<ReplyResult>((resolve) => {
+			if (!signal) return;
+			onAbort = () => resolve({ response: null, error: "cancelled" });
+			signal.addEventListener("abort", onAbort, { once: true });
+		});
+
+		try {
+			return await Promise.race([localPromise, serverPromise, timeoutPromise, abortPromise]);
+		} finally {
+			try { ac.abort(); } catch { /* ignore */ }
+			if (timer) clearTimeout(timer);
+			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+		}
 	}
 
 	pi.registerTool({
 		name: "coms_net_broadcast",
 		label: "Coms Net Broadcast",
+		promptSnippet: "Send one prompt to many peers at once and gather every reply",
+		promptGuidelines: [
+			"Never call coms_net_broadcast to reply to an inbound coms-net message; it starts new conversations.",
+		],
 		description:
 			"Send ONE prompt to MANY peers at once and block until every reply (or the timeout) lands. " +
 			"Targets default to every online/stale peer in your project; pass `targets` to address a subset by name. " +
@@ -1647,7 +1656,7 @@ export default function (pi: ExtensionAPI) {
 			targets: Type.Optional(Type.Array(Type.String(), { description: "Peer names. Defaults to all online/stale peers in the project." })),
 			timeout_ms: Type.Optional(Type.Number({ description: "Per-peer reply timeout (ms). Default 30 min. Use minutes, not seconds, for prompts that make peers investigate — replies only arrive when their whole turn ends." })),
 		}),
-		async execute(_callId, params) {
+		async execute(_callId, params, signal) {
 			if (!identity) throw new Error("coms-net not initialised");
 
 			const hops = outboundHops(inboundQueue.values());
@@ -1663,7 +1672,7 @@ export default function (pi: ExtensionAPI) {
 			// Resolve targets: explicit list, or every reachable peer in the project.
 			let targets: string[] = Array.isArray((params as any).targets) ? (params as any).targets : [];
 			if (targets.length === 0) {
-				const resp = await httpFetch("GET", `/v1/agents?project=${encodeURIComponent(identity.project)}&include_explicit=false`);
+				const resp = await httpFetch("GET", `/v1/agents?project=${encodeURIComponent(identity.project)}&include_explicit=false`, undefined, { signal });
 				const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
 				targets = agents
 					.filter((a) => a.session_id !== identity!.session_id && a.status !== "offline")
@@ -1723,7 +1732,7 @@ export default function (pi: ExtensionAPI) {
 			// Gather every reply in parallel.
 			const results = await Promise.all(sends.map(async (s) => {
 				if (!s.msg_id) return { target: s.target, msg_id: null as string | null, response: null, error: s.error };
-				const r = await awaitReplyResult(s.msg_id, timeoutMs);
+				const r = await awaitReplyResult(s.msg_id, timeoutMs, signal);
 				return { target: s.target, msg_id: s.msg_id, response: r.response ?? null, error: r.error ?? null };
 			}));
 
@@ -1735,7 +1744,7 @@ export default function (pi: ExtensionAPI) {
 			}).join("\n\n");
 
 			return {
-				content: [{ type: "text" as const, text: `coms_net_broadcast: ${ok}/${results.length} replied\n\n${lines}` }],
+				content: [{ type: "text" as const, text: clampToolText(`coms_net_broadcast: ${ok}/${results.length} replied\n\n${lines}`, "broadcast") }],
 				details: { results, hops, replied: ok, total: results.length },
 			};
 		},
