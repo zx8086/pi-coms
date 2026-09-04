@@ -1,5 +1,6 @@
 // scripts/monitor/checks/identity.ts
-import { GetCallerIdentityCommand } from "@aws-sdk/client-sts";
+import { GetCallerIdentityCommand, type GetCallerIdentityCommandOutput } from "@aws-sdk/client-sts";
+import { errorMessage } from "../errors.ts";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -26,11 +27,11 @@ export async function checkIdentity(
 	let arn: string | null = null;
 	let error: string | null = null;
 	try {
-		const resp = await client.send(new GetCallerIdentityCommand({}));
+		const resp = (await client.send(new GetCallerIdentityCommand({}))) as GetCallerIdentityCommandOutput;
 		account = resp.Account ?? null;
 		arn = resp.Arn ?? null;
-	} catch (e: any) {
-		error = String(e?.message ?? e);
+	} catch (e) {
+		error = errorMessage(e);
 	}
 
 	const mismatch = error === null && expected && expected !== "unknown" && account !== expected;

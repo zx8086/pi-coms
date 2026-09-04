@@ -1,7 +1,14 @@
 // scripts/monitor/checks/resource-drift.ts
-import { DescribeRouteTablesCommand, DescribeSecurityGroupsCommand } from "@aws-sdk/client-ec2";
-import { ListFunctionsCommand } from "@aws-sdk/client-lambda";
-import { DescribeDBInstancesCommand } from "@aws-sdk/client-rds";
+import {
+	DescribeRouteTablesCommand,
+	type DescribeRouteTablesCommandOutput,
+	DescribeSecurityGroupsCommand,
+	type DescribeSecurityGroupsCommandOutput,
+	type IpPermission,
+	type Route,
+} from "@aws-sdk/client-ec2";
+import { ListFunctionsCommand, type ListFunctionsCommandOutput } from "@aws-sdk/client-lambda";
+import { DescribeDBInstancesCommand, type DescribeDBInstancesCommandOutput } from "@aws-sdk/client-rds";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -65,17 +72,17 @@ function info(resource: string, summary: string, dedup_key: string, evidence: un
 	return { family: "drift", severity: "info", resource, summary, dedup_key, evidence, at };
 }
 
-function ruleKey(r: any): string {
+function ruleKey(r: IpPermission): string {
 	const sources = [
-		...(r.IpRanges ?? []).map((x: any) => x.CidrIp),
-		...(r.Ipv6Ranges ?? []).map((x: any) => x.CidrIpv6),
-		...(r.PrefixListIds ?? []).map((x: any) => x.PrefixListId),
-		...(r.UserIdGroupPairs ?? []).map((x: any) => x.GroupId),
+		...(r.IpRanges ?? []).map((x) => x.CidrIp),
+		...(r.Ipv6Ranges ?? []).map((x) => x.CidrIpv6),
+		...(r.PrefixListIds ?? []).map((x) => x.PrefixListId),
+		...(r.UserIdGroupPairs ?? []).map((x) => x.GroupId),
 	].sort();
 	return `${r.IpProtocol ?? "-"}:${r.FromPort ?? "-"}:${r.ToPort ?? "-"}:${sources.join("|")}`;
 }
 
-function routeTarget(r: any): string {
+function routeTarget(r: Route): string {
 	return (
 		r.GatewayId ??
 		r.NatGatewayId ??
@@ -93,7 +100,9 @@ async function scanSecurityGroups(ec2: AwsClient): Promise<Record<string, string
 	const current: Record<string, string> = {};
 	let token: string | undefined;
 	do {
-		const resp = await ec2.send(new DescribeSecurityGroupsCommand({ NextToken: token }));
+		const resp = (await ec2.send(
+			new DescribeSecurityGroupsCommand({ NextToken: token }),
+		)) as DescribeSecurityGroupsCommandOutput;
 		for (const g of resp.SecurityGroups ?? []) {
 			if (!g.GroupId) continue;
 			current[g.GroupId] = canonical({
@@ -110,11 +119,13 @@ async function scanRouteTables(ec2: AwsClient): Promise<Record<string, string>> 
 	const current: Record<string, string> = {};
 	let token: string | undefined;
 	do {
-		const resp = await ec2.send(new DescribeRouteTablesCommand({ NextToken: token }));
+		const resp = (await ec2.send(
+			new DescribeRouteTablesCommand({ NextToken: token }),
+		)) as DescribeRouteTablesCommandOutput;
 		for (const t of resp.RouteTables ?? []) {
 			if (!t.RouteTableId) continue;
 			const routes = (t.Routes ?? [])
-				.map((r: any) => `${r.DestinationCidrBlock ?? r.DestinationPrefixListId ?? r.DestinationIpv6CidrBlock ?? "?"}->${routeTarget(r)}:${r.State ?? "?"}`)
+				.map((r) => `${r.DestinationCidrBlock ?? r.DestinationPrefixListId ?? r.DestinationIpv6CidrBlock ?? "?"}->${routeTarget(r)}:${r.State ?? "?"}`)
 				.sort();
 			current[t.RouteTableId] = canonical(routes);
 		}
@@ -127,7 +138,9 @@ async function scanRdsInstances(rds: AwsClient): Promise<Record<string, string>>
 	const current: Record<string, string> = {};
 	let marker: string | undefined;
 	do {
-		const resp = await rds.send(new DescribeDBInstancesCommand({ Marker: marker }));
+		const resp = (await rds.send(
+			new DescribeDBInstancesCommand({ Marker: marker }),
+		)) as DescribeDBInstancesCommandOutput;
 		for (const d of resp.DBInstances ?? []) {
 			if (!d.DBInstanceIdentifier) continue;
 			current[d.DBInstanceIdentifier] = canonical({
@@ -147,7 +160,7 @@ async function scanLambdaFunctions(lambda: AwsClient): Promise<Record<string, st
 	const current: Record<string, string> = {};
 	let marker: string | undefined;
 	do {
-		const resp = await lambda.send(new ListFunctionsCommand({ Marker: marker }));
+		const resp = (await lambda.send(new ListFunctionsCommand({ Marker: marker }))) as ListFunctionsCommandOutput;
 		for (const f of resp.Functions ?? []) {
 			if (!f.FunctionName) continue;
 			current[f.FunctionName] = canonical({

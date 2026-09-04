@@ -4,6 +4,7 @@
 // Registers as an explicit peer, answers inbound prompts through a callback,
 // and sends messages with optional ttl_ms for mailbox delivery.
 import * as crypto from "node:crypto";
+import { errorMessage } from "./errors.ts";
 
 // Bound on parked reply entries; the hub answers /v1/messages/:id for evicted ids.
 const PENDING_CAP = 200;
@@ -50,9 +51,24 @@ function ulid(): string {
 }
 
 type PendingReply = {
-	promise: Promise<{ response?: any; error?: string | null }>;
-	resolve: (v: { response?: any; error?: string | null }) => void;
-	result?: { response?: any; error?: string | null };
+	promise: Promise<{ response?: unknown; error?: string | null }>;
+	resolve: (v: { response?: unknown; error?: string | null }) => void;
+	result?: { response?: unknown; error?: string | null };
+};
+
+// Hub reply shapes this client reads (see RegisterResponse / SendResponse in
+// scripts/coms-net-server.ts).
+type RegisterReply = { agent: { name: string }; sse_url: string; heartbeat_interval_ms?: number };
+type SendReply = { msg_id: string; status: string };
+
+// SSE frame data for the prompt and response events.
+type FramePayload = {
+	msg_id: string;
+	sender?: { name?: string };
+	prompt?: string;
+	response_schema?: object | null;
+	response?: unknown;
+	error?: string | null;
 };
 
 export class MonitorComs {
@@ -74,14 +90,14 @@ export class MonitorComs {
 		return this.assignedName;
 	}
 
-	private async http(method: string, p: string, body?: unknown): Promise<any> {
+	private async http<T = unknown>(method: string, p: string, body?: unknown): Promise<T> {
 		const resp = await fetch(this.opts.serverUrl + p, {
 			method,
 			headers: { authorization: `Bearer ${this.opts.token}`, "content-type": "application/json" },
 			body: body === undefined ? undefined : JSON.stringify(body),
 		});
 		const text = await resp.text();
-		let parsed: any = null;
+		let parsed: unknown = null;
 		if (text.length > 0) {
 			try {
 				parsed = JSON.parse(text);
@@ -90,12 +106,16 @@ export class MonitorComs {
 			}
 		}
 		if (!resp.ok) {
-			throw Object.assign(new Error(`HTTP ${resp.status} ${method} ${p}: ${parsed?.error ?? text}`), {
+			const detail =
+				typeof parsed === "object" && parsed !== null && "error" in parsed && parsed.error != null
+					? parsed.error
+					: text;
+			throw Object.assign(new Error(`HTTP ${resp.status} ${method} ${p}: ${detail}`), {
 				status: resp.status,
 				body: parsed,
 			});
 		}
-		return parsed;
+		return parsed as T;
 	}
 
 	private registerBody(name: string) {
@@ -112,7 +132,7 @@ export class MonitorComs {
 	}
 
 	async start(): Promise<void> {
-		const reg = await this.http("POST", "/v1/agents/register", this.registerBody(this.opts.name));
+		const reg = await this.http<RegisterReply>("POST", "/v1/agents/register", this.registerBody(this.opts.name));
 		this.assignedName = reg.agent.name;
 		this.sseUrl = reg.sse_url;
 		void this.sseLoop();
@@ -126,7 +146,7 @@ export class MonitorComs {
 				// transient; the SSE loop re-registers on disconnect
 			});
 		}, reg.heartbeat_interval_ms ?? 10_000);
-		(this.heartbeatTimer as any).unref?.();
+		this.heartbeatTimer.unref();
 	}
 
 	private async sseLoop(): Promise<void> {
@@ -160,7 +180,7 @@ export class MonitorComs {
 			await Bun.sleep(2_000);
 			// Re-register: the session may have been reaped while disconnected.
 			try {
-				const reg = await this.http("POST", "/v1/agents/register", this.registerBody(this.assignedName));
+				const reg = await this.http<RegisterReply>("POST", "/v1/agents/register", this.registerBody(this.assignedName));
 				this.sseUrl = reg.sse_url;
 			} catch {
 				// hub unreachable; retry next loop
@@ -176,7 +196,7 @@ export class MonitorComs {
 			else if (line.startsWith("data:")) data = line.slice(5).trim();
 		}
 		if (!data) return;
-		let payload: any;
+		let payload: FramePayload;
 		try {
 			payload = JSON.parse(data);
 		} catch {
@@ -204,8 +224,8 @@ export class MonitorComs {
 		let error: string | null = null;
 		try {
 			response = await this.opts.onPrompt(p);
-		} catch (e: any) {
-			error = String(e?.message ?? e);
+		} catch (e) {
+			error = errorMessage(e);
 		}
 		try {
 			await this.http("POST", `/v1/messages/${encodeURIComponent(p.msg_id)}/response`, {
@@ -226,7 +246,7 @@ export class MonitorComs {
 		prompt: string,
 		opts: { ttl_ms?: number; response_schema?: object; expectReply?: boolean } = {},
 	): Promise<{ msg_id: string; status: string }> {
-		const resp = await this.http("POST", "/v1/messages", {
+		const resp = await this.http<SendReply>("POST", "/v1/messages", {
 			project: this.opts.project,
 			sender_session: this.sessionId,
 			target,
@@ -238,8 +258,8 @@ export class MonitorComs {
 			...(opts.ttl_ms ? { ttl_ms: opts.ttl_ms } : {}),
 		});
 		if (opts.expectReply !== false) {
-			let resolve!: (v: { response?: any; error?: string | null }) => void;
-			const promise = new Promise<{ response?: any; error?: string | null }>((res) => {
+			let resolve!: (v: { response?: unknown; error?: string | null }) => void;
+			const promise = new Promise<{ response?: unknown; error?: string | null }>((res) => {
 				resolve = res;
 			});
 			this.pending.set(resp.msg_id, { promise, resolve });
@@ -256,7 +276,7 @@ export class MonitorComs {
 		return this.pending.size;
 	}
 
-	async awaitReply(msg_id: string, timeoutMs: number): Promise<{ response?: any; error?: string | null }> {
+	async awaitReply(msg_id: string, timeoutMs: number): Promise<{ response?: unknown; error?: string | null }> {
 		const pend = this.pending.get(msg_id);
 		if (pend?.result) {
 			this.pending.delete(msg_id);
@@ -266,7 +286,7 @@ export class MonitorComs {
 		const timeout = Bun.sleep(timeoutMs).then(() => ({ error: "timeout" as const }));
 		const winner = await Promise.race([local, timeout]);
 		this.pending.delete(msg_id);
-		return winner as { response?: any; error?: string | null };
+		return winner as { response?: unknown; error?: string | null };
 	}
 
 	async stop(): Promise<void> {

@@ -3,13 +3,20 @@ import { describe, expect, test } from "bun:test";
 import { checkLogs, logSignature } from "../scripts/monitor/checks/logs.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
+// What the fakes read off a command: its class name and the filter inputs.
+type Cmd = {
+	constructor: { name: string };
+	input: { logGroupName?: string; startTime?: number; filterPattern?: string };
+};
+type LogsEvidence = { count: number; overflow: unknown[] };
+
 function fakeClient(
 	groups: string[],
 	eventsByGroup: Record<string, { timestamp: number; message: string }[]>,
 ) {
 	return {
-		calls: [] as any[],
-		async send(cmd: any) {
+		calls: [] as Cmd[],
+		async send(cmd: Cmd) {
 			this.calls.push(cmd);
 			if (cmd.constructor.name === "DescribeLogGroupsCommand") {
 				return { logGroups: groups.map((g) => ({ logGroupName: g })) };
@@ -44,7 +51,7 @@ describe("checkLogs", () => {
 		const out = await checkLogs(client, state, { now });
 		expect(out).toHaveLength(1);
 		expect(out[0].severity).toBe("warn");
-		expect((out[0].evidence as any).count).toBe(2);
+		expect((out[0].evidence as LogsEvidence).count).toBe(2);
 		expect(state.getWatermark("logs:/aws/app")).toBe(now - 30_000 + 1);
 	});
 
@@ -100,9 +107,9 @@ describe("checkLogs relevance caps", () => {
 		const warns = out.filter((f) => f.severity === "warn");
 		const infos = out.filter((f) => f.severity === "info");
 		expect(warns).toHaveLength(3);
-		expect((warns[0].evidence as any).count).toBe(3); // loudest first
+		expect((warns[0].evidence as LogsEvidence).count).toBe(3); // loudest first
 		expect(infos).toHaveLength(1);
-		expect((infos[0].evidence as any).overflow).toHaveLength(2);
+		expect((infos[0].evidence as LogsEvidence).overflow).toHaveLength(2);
 	});
 
 	test("per-cycle cap bounds warn findings across groups", async () => {
@@ -120,8 +127,8 @@ describe("checkLogs relevance caps", () => {
 		const state = new MonitorState(":memory:");
 		const client = fakeClient(["/aws/app"], { "/aws/app": [ev("ERROR x")] });
 		await checkLogs(client, state, { now });
-		const filterCall = client.calls.find((c: any) => c.constructor.name === "FilterLogEventsCommand");
-		expect(filterCall.input.filterPattern).toBe("?ERROR ?Exception");
+		const filterCall = client.calls.find((c) => c.constructor.name === "FilterLogEventsCommand");
+		expect(filterCall?.input.filterPattern).toBe("?ERROR ?Exception");
 	});
 });
 
@@ -176,7 +183,7 @@ function failingClient(
 	eventsByGroup: Record<string, { timestamp: number; message: string }[]> = {},
 ) {
 	return {
-		async send(cmd: any) {
+		async send(cmd: Cmd) {
 			if (cmd.constructor.name === "DescribeLogGroupsCommand") {
 				return { logGroups: groups.map((g) => ({ logGroupName: g })) };
 			}

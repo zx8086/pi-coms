@@ -1,15 +1,17 @@
 // scripts/monitor/checks/alarms.ts
-import { DescribeAlarmsCommand } from "@aws-sdk/client-cloudwatch";
+import { DescribeAlarmsCommand, type DescribeAlarmsCommandOutput } from "@aws-sdk/client-cloudwatch";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 
+// Structural subset of every AWS SDK v3 client: the command decides the
+// output shape, so callers narrow the result to that command's Output type.
 export interface AwsClient {
-	send(cmd: any): Promise<any>;
+	send(cmd: unknown): Promise<unknown>;
 }
 
 export async function checkAlarms(client: AwsClient, state: MonitorState): Promise<Finding[]> {
 	const findings: Finding[] = [];
-	const resp = await client.send(new DescribeAlarmsCommand({}));
+	const resp = (await client.send(new DescribeAlarmsCommand({}))) as DescribeAlarmsCommandOutput;
 	const alarms = [...(resp.MetricAlarms ?? []), ...(resp.CompositeAlarms ?? [])];
 	for (const a of alarms) {
 		const name: string = a.AlarmName ?? "unknown";

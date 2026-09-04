@@ -1,9 +1,11 @@
 // tests/checks-resource-drift.test.ts
+
 import { describe, expect, test } from "bun:test";
+import type { IpPermission } from "@aws-sdk/client-ec2";
 import { checkResourceDrift } from "../scripts/monitor/checks/resource-drift.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
-type Sg = { id: string; ingress?: any[]; egress?: any[] };
+type Sg = { id: string; ingress?: IpPermission[]; egress?: IpPermission[] };
 type Rtb = { id: string; routes?: { dest: string; target: string }[] };
 type Db = {
 	id: string;
@@ -14,10 +16,12 @@ type Db = {
 	publiclyAccessible?: boolean;
 };
 type Fn = { name: string; runtime?: string; memory?: number; timeout?: number; role?: string };
+// The fakes dispatch on the command class name only.
+type Cmd = { constructor: { name: string } };
 
 function ec2Client(sgs: Sg[], rtbs: Rtb[], failSgs = false) {
 	return {
-		async send(cmd: any) {
+		async send(cmd: Cmd) {
 			if (cmd.constructor.name === "DescribeSecurityGroupsCommand") {
 				if (failSgs) throw new Error("AccessDenied: DescribeSecurityGroups");
 				return {
@@ -47,7 +51,7 @@ function ec2Client(sgs: Sg[], rtbs: Rtb[], failSgs = false) {
 
 function rdsClient(dbs: Db[]) {
 	return {
-		async send(cmd: any) {
+		async send(cmd: Cmd) {
 			if (cmd.constructor.name !== "DescribeDBInstancesCommand") {
 				throw new Error(`unexpected ${cmd.constructor.name}`);
 			}
@@ -67,7 +71,7 @@ function rdsClient(dbs: Db[]) {
 
 function lambdaClient(fns: Fn[]) {
 	return {
-		async send(cmd: any) {
+		async send(cmd: Cmd) {
 			if (cmd.constructor.name !== "ListFunctionsCommand") {
 				throw new Error(`unexpected ${cmd.constructor.name}`);
 			}

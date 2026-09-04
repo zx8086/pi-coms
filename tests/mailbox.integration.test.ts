@@ -2,7 +2,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { api, readSseEvents, register, send, startHub, stopAllHubs, stopHub, TOKEN } from "./harness.ts";
+import {
+	api,
+	type MessageLookup,
+	readSseEvents,
+	register,
+	type SendResponse,
+	send,
+	startHub,
+	stopAllHubs,
+	stopHub,
+	TOKEN,
+} from "./harness.ts";
 
 afterEach(async () => {
 	await stopAllHubs();
@@ -14,7 +25,7 @@ describe("mailbox send", () => {
 		await register(hub, "SENDER", "monitor");
 		const r = await send(hub, "SENDER", "laptop", "report 1", 86_400_000);
 		expect(r.status).toBe(200);
-		const body = (await r.json()) as any;
+		const body = (await r.json()) as SendResponse;
 		expect(body.status).toBe("queued");
 		expect(body.target_session).toBeNull();
 	});
@@ -39,7 +50,7 @@ describe("mailbox send", () => {
 		const { Database } = await import("bun:sqlite");
 		const row = new Database(db, { readonly: true })
 			.query("SELECT expires_at FROM messages")
-			.get() as any;
+			.get() as { expires_at: string };
 		const ttl = Date.parse(row.expires_at) - Date.now();
 		expect(ttl).toBeLessThanOrEqual(1_209_600_000 + 5_000);
 		expect(ttl).toBeGreaterThan(1_200_000_000);
@@ -54,7 +65,7 @@ describe("mailbox send", () => {
 		expect(resp.status).toBe(200);
 		await Bun.sleep(100);
 		const r = await send(hub, "SENDER", "laptop", "hello there", 86_400_000);
-		const body = (await r.json()) as any;
+		const body = (await r.json()) as SendResponse;
 		expect(body.status).toBe("delivered");
 		expect(body.target_session).toBe("TGT");
 		await resp.body?.cancel();
@@ -96,7 +107,7 @@ describe("mailbox flush and recovery", () => {
 		const hub = await startHub();
 		await register(hub, "SENDER", "monitor");
 		const s = await send(hub, "SENDER", "laptop", "ack me", 86_400_000);
-		const { msg_id } = (await s.json()) as any;
+		const { msg_id } = (await s.json()) as SendResponse;
 		const sseUrl = await register(hub, "LAP", "laptop");
 		const resp = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${TOKEN}` } });
 		const [prompt] = await readSseEvents(resp, "prompt", 1);
@@ -108,7 +119,7 @@ describe("mailbox flush and recovery", () => {
 		});
 		expect(rr.status).toBe(200);
 		const g = await api(hub, "GET", `/v1/messages/${msg_id}`);
-		expect(((await g.json()) as any).response).toBe("acked");
+		expect(((await g.json()) as MessageLookup).response).toBe("acked");
 		await resp.body?.cancel();
 	});
 });

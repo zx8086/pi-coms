@@ -5,7 +5,7 @@ import { MonitorState } from "../scripts/monitor/state.ts";
 
 function fakeClient(daily: { date: string; usd: number }[]) {
 	return {
-		async send(cmd: any) {
+		async send(cmd: { constructor: { name: string } }) {
 			if (cmd.constructor.name !== "GetCostAndUsageCommand") throw new Error("unexpected");
 			return {
 				ResultsByTime: daily.map((d) => ({

@@ -1,5 +1,5 @@
 // scripts/monitor/checks/watchlist.ts
-import { LookupEventsCommand } from "@aws-sdk/client-cloudtrail";
+import { LookupEventsCommand, type LookupEventsCommandOutput } from "@aws-sdk/client-cloudtrail";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -57,20 +57,20 @@ export async function checkWatchlist(
 	for (const name of events) {
 		let nextToken: string | undefined;
 		do {
-			const resp: any = await client.send(
+			const resp = (await client.send(
 				new LookupEventsCommand({
 					LookupAttributes: [{ AttributeKey: "EventName", AttributeValue: name }],
 					StartTime: new Date(since),
 					EndTime: new Date(now),
 					NextToken: nextToken,
 				}),
-			);
+			)) as LookupEventsCommandOutput;
 			for (const e of resp.Events ?? []) {
 				const id: string = e.EventId ?? "unknown";
 				const key = `watch:${name}:${id}`;
 				if (!state.shouldAlert(key)) continue;
 				state.markAlerted(key, "watchlist");
-				let detail: any = {};
+				let detail: { sourceIPAddress?: string; userIdentity?: { arn?: string } } = {};
 				try {
 					detail = JSON.parse(e.CloudTrailEvent ?? "{}");
 				} catch {
@@ -88,7 +88,7 @@ export async function checkWatchlist(
 						username: e.Username ?? null,
 						sourceIp: detail?.sourceIPAddress ?? null,
 						userArn: detail?.userIdentity?.arn ?? null,
-						resources: (e.Resources ?? []).map((r: any) => r.ResourceName).filter(Boolean),
+						resources: (e.Resources ?? []).map((r) => r.ResourceName).filter(Boolean),
 					},
 					at,
 				});

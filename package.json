@@ -20,7 +20,10 @@
   },
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "biome:check": "biome check .",
+    "biome:check:write": "biome check --write .",
+    "yaml:check": "yamllint -d relaxed .github/"
   },
   "dependencies": {
     "@aws-sdk/client-acm": "^3.1123.0",
@@ -51,6 +54,7 @@
     }
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
     "@types/bun": "latest",
     "typescript": "^5"
   }

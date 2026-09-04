@@ -8,7 +8,7 @@ function fakeClient(
 	statuses: { id: string; system: string; instance: string }[] = [],
 ) {
 	return {
-		async send(cmd: any) {
+		async send(cmd: { constructor: { name: string } }) {
 			if (cmd.constructor.name === "DescribeInstancesCommand") {
 				return {
 					Reservations: [{

@@ -1,6 +1,17 @@
 // tests/inbox.integration.test.ts
 import { afterEach, describe, expect, test } from "bun:test";
-import { api, readSseEvents, register, send, startHub, stopAllHubs, stopHub, TOKEN } from "./harness.ts";
+import {
+	api,
+	type InboxListing,
+	readSseEvents,
+	register,
+	type SendResponse,
+	send,
+	startHub,
+	stopAllHubs,
+	stopHub,
+	TOKEN,
+} from "./harness.ts";
 
 afterEach(async () => {
 	await stopAllHubs();
@@ -13,7 +24,7 @@ describe("shared inbox", () => {
 		await send(hub, "SENDER", "ops", "report one", 86_400_000);
 		await Bun.sleep(10);
 		const s2 = await send(hub, "SENDER", "ops", "report two", 86_400_000);
-		const { msg_id: secondId } = (await s2.json()) as any;
+		const { msg_id: secondId } = (await s2.json()) as SendResponse;
 
 		// Deliver and complete the first report through a duty session.
 		const sseUrl = await register(hub, "DUTY", "ops");
@@ -30,20 +41,20 @@ describe("shared inbox", () => {
 		const read = async () => {
 			const r = await api(hub, "GET", "/v1/mailbox?project=default&name=ops&limit=10");
 			expect(r.status).toBe(200);
-			return ((await r.json()) as any).messages;
+			return ((await r.json()) as InboxListing).messages;
 		};
 		const one = await read();
 		const two = await read();
 		expect(one).toEqual(two);
 		expect(one).toHaveLength(2);
-		expect(one.map((m: any) => m.prompt)).toEqual(["report one", "report two"]);
+		expect(one.map((m) => m.prompt)).toEqual(["report one", "report two"]);
 		expect(one[0].status).toBe("complete"); // completed mail stays readable
 		expect(one[0].sender_name).toBe("monitor");
 
 		// since-cursor: only the second report comes back.
 		const r = await api(hub, "GET", `/v1/mailbox?project=default&name=ops&limit=10&since=${one[0].msg_id}`);
-		const newer = ((await r.json()) as any).messages;
-		expect(newer.map((m: any) => m.msg_id)).toEqual([secondId]);
+		const newer = ((await r.json()) as InboxListing).messages;
+		expect(newer.map((m) => m.msg_id)).toEqual([secondId]);
 	});
 
 	test("inbox survives a hub restart", async () => {
@@ -55,8 +66,8 @@ describe("shared inbox", () => {
 		const hub2 = await startHub(home);
 		await register(hub2, "USER1", "simon");
 		const r = await api(hub2, "GET", "/v1/mailbox?project=default&name=ops&limit=10");
-		const msgs = ((await r.json()) as any).messages;
-		expect(msgs.map((m: any) => m.prompt)).toEqual(["durable report"]);
+		const msgs = ((await r.json()) as InboxListing).messages;
+		expect(msgs.map((m) => m.prompt)).toEqual(["durable report"]);
 	});
 
 	test("a completed conversation becomes part of the target's inbox, an in-flight one does not (SIO-1620)", async () => {
@@ -70,19 +81,19 @@ describe("shared inbox", () => {
 
 		// delivered but unanswered: not history yet
 		let r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
-		expect(((await r.json()) as any).messages).toHaveLength(0);
+		expect(((await r.json()) as InboxListing).messages).toHaveLength(0);
 
 		await api(hub, "POST", `/v1/messages/${prompt.msg_id}/response`, {
 			project: "default", responder_session: "TGT", response: "answer", error: null,
 		});
 		await resp.body?.cancel();
 		r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
-		const msgs = ((await r.json()) as any).messages;
+		const msgs = ((await r.json()) as InboxListing).messages;
 		expect(msgs).toHaveLength(1);
 		expect(msgs[0]).toMatchObject({ prompt: "quick question", status: "complete", response: "answer", sender_name: "monitor" });
 		// the shared ops inbox is untouched by conversations with other names
 		const ops = await api(hub, "GET", "/v1/mailbox?project=default&name=ops&limit=10");
-		expect(((await ops.json()) as any).messages).toHaveLength(0);
+		expect(((await ops.json()) as InboxListing).messages).toHaveLength(0);
 	});
 
 	test("a conversation leaves hub memory after the message TTL but stays on disk until the retention window (SIO-1620)", async () => {
@@ -110,14 +121,14 @@ describe("shared inbox", () => {
 		}
 		expect(inMemory).toBe(404);
 		let r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
-		expect(((await r.json()) as any).messages.map((m: any) => m.response)).toEqual(["kept"]);
+		expect(((await r.json()) as InboxListing).messages.map((m) => m.response)).toEqual(["kept"]);
 
 		// past the retention window: purged
 		let left = 1;
 		for (let i = 0; i < 30 && left !== 0; i++) {
 			await Bun.sleep(100);
 			r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
-			left = ((await r.json()) as any).messages.length;
+			left = ((await r.json()) as InboxListing).messages.length;
 		}
 		expect(left).toBe(0);
 	});

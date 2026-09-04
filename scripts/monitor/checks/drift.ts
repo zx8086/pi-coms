@@ -1,5 +1,10 @@
 // scripts/monitor/checks/drift.ts
-import { DescribeInstanceStatusCommand, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
+import {
+	DescribeInstanceStatusCommand,
+	type DescribeInstanceStatusCommandOutput,
+	DescribeInstancesCommand,
+	type DescribeInstancesCommandOutput,
+} from "@aws-sdk/client-ec2";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -11,7 +16,7 @@ export async function checkDrift(client: AwsClient, state: MonitorState): Promis
 	const findings: Finding[] = [];
 	const now = new Date().toISOString();
 
-	const di = await client.send(new DescribeInstancesCommand({}));
+	const di = (await client.send(new DescribeInstancesCommand({}))) as DescribeInstancesCommandOutput;
 	const current: Record<string, string> = {};
 	for (const r of di.Reservations ?? []) {
 		for (const i of r.Instances ?? []) {
@@ -63,7 +68,9 @@ export async function checkDrift(client: AwsClient, state: MonitorState): Promis
 	}
 	state.setSnapshot("instances", current);
 
-	const ds = await client.send(new DescribeInstanceStatusCommand({ IncludeAllInstances: false }));
+	const ds = (await client.send(
+		new DescribeInstanceStatusCommand({ IncludeAllInstances: false }),
+	)) as DescribeInstanceStatusCommandOutput;
 	const failedNow = new Set<string>();
 	for (const s of ds.InstanceStatuses ?? []) {
 		const id = s.InstanceId ?? "unknown";

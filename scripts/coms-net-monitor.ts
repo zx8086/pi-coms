@@ -5,6 +5,8 @@
 // coms-net; reports mail to the operator via the hub mailbox with a long TTL.
 // Run as pi-monitor.service; state in ~/.pi/monitor/state.db.
 
+import * as os from "node:os";
+import * as path from "node:path";
 import { ACMClient } from "@aws-sdk/client-acm";
 import { CloudTrailClient } from "@aws-sdk/client-cloudtrail";
 import { CloudWatchClient, DescribeAlarmsCommand } from "@aws-sdk/client-cloudwatch";
@@ -14,8 +16,6 @@ import { EC2Client } from "@aws-sdk/client-ec2";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { RDSClient } from "@aws-sdk/client-rds";
 import { STSClient } from "@aws-sdk/client-sts";
-import * as os from "node:os";
-import * as path from "node:path";
 import { checkAlarms } from "./monitor/checks/alarms.ts";
 import { certRegions, checkCerts } from "./monitor/checks/certs.ts";
 import { checkCost } from "./monitor/checks/cost.ts";
@@ -27,6 +27,7 @@ import { checkResourceDrift } from "./monitor/checks/resource-drift.ts";
 import { checkTrail } from "./monitor/checks/trail.ts";
 import { checkWatchlist } from "./monitor/checks/watchlist.ts";
 import { MonitorComs } from "./monitor/coms.ts";
+import { errorMessage } from "./monitor/errors.ts";
 import {
 	DIAGNOSIS_RESPONSE_SCHEMA,
 	type Diagnosis,
@@ -123,20 +124,20 @@ export async function runCycle(
 			collected.push(...g.findings);
 			gated = !g.healthy;
 			if (gated) deps.log(`gate ${deps.gate.name} unhealthy: skipping checks this cycle`);
-		} catch (e: any) {
+		} catch (e) {
 			// A throwing gate is an unknown, not a proven failure: journal it and
 			// let the checks report reality.
-			deps.state.journal("check_error", { check: deps.gate.name, error: String(e?.message ?? e) });
-			deps.log(`gate ${deps.gate.name} threw: ${e?.message ?? e}`);
+			deps.state.journal("check_error", { check: deps.gate.name, error: errorMessage(e) });
+			deps.log(`gate ${deps.gate.name} threw: ${errorMessage(e)}`);
 		}
 	}
 	if (!gated) {
 		for (const c of deps.checks) {
 			try {
 				collected.push(...(await c.run()));
-			} catch (e: any) {
-				deps.state.journal("check_error", { check: c.name, error: String(e?.message ?? e) });
-				deps.log(`check ${c.name} failed: ${e?.message ?? e}`);
+			} catch (e) {
+				deps.state.journal("check_error", { check: c.name, error: errorMessage(e) });
+				deps.log(`check ${c.name} failed: ${errorMessage(e)}`);
 			}
 		}
 	}
@@ -167,9 +168,9 @@ export async function runCycle(
 				const outcome = await deps.investigate(toInvestigate, prior);
 				diagnoses = outcome.diagnoses;
 				investigationFailure = outcome.failure;
-			} catch (e: any) {
+			} catch (e) {
 				diagnoses = null;
-				investigationFailure = `investigate threw: ${e?.message ?? e}`;
+				investigationFailure = `investigate threw: ${errorMessage(e)}`;
 			}
 			if (investigationFailure) deps.log(`investigation failed: ${investigationFailure}`);
 		}
@@ -184,9 +185,9 @@ export async function runCycle(
 		);
 		try {
 			await deps.report(text);
-		} catch (e: any) {
+		} catch (e) {
 			deps.state.queueUnsent(REPORT_TO, text, REPORT_TTL_MS);
-			deps.log(`report failed, queued locally: ${e?.message ?? e}`);
+			deps.log(`report failed, queued locally: ${errorMessage(e)}`);
 		}
 	}
 
@@ -288,8 +289,8 @@ function main(): void {
 			const diagnoses = parseDiagnoses(reply.response);
 			if (!diagnoses) return { diagnoses: null, failure: "agent reply did not match the diagnosis schema" };
 			return { diagnoses, failure: null };
-		} catch (e: any) {
-			return { diagnoses: null, failure: `send to ${INVESTIGATE_TARGET} failed: ${e?.message ?? e}` };
+		} catch (e) {
+			return { diagnoses: null, failure: `send to ${INVESTIGATE_TARGET} failed: ${errorMessage(e)}` };
 		}
 	};
 
@@ -349,13 +350,13 @@ function main(): void {
 		}
 		const errsByCheck: Record<string, number> = {};
 		for (const r of state.journalRows(day, "check_error")) {
-			const check = String((JSON.parse(r.payload) as any).check ?? "unknown");
+			const check = String((JSON.parse(r.payload) as { check?: unknown }).check ?? "unknown");
 			errsByCheck[check] = (errsByCheck[check] ?? 0) + 1;
 		}
 		let activeAlarms: string[] = [];
 		try {
 			const resp = await cw.send(new DescribeAlarmsCommand({ StateValue: "ALARM" }));
-			activeAlarms = (resp.MetricAlarms ?? []).map((a: any) => a.AlarmName);
+			activeAlarms = (resp.MetricAlarms ?? []).map((a) => a.AlarmName ?? "");
 		} catch {
 			// digest still ships
 		}
@@ -389,9 +390,9 @@ function main(): void {
 		const text = buildSuppressionReview();
 		try {
 			await report(text);
-		} catch (e: any) {
+		} catch (e) {
 			state.queueUnsent(REPORT_TO, text, REPORT_TTL_MS);
-			log(`suppression review send failed, queued: ${e?.message ?? e}`);
+			log(`suppression review send failed, queued: ${errorMessage(e)}`);
 		}
 	};
 
@@ -419,9 +420,9 @@ function main(): void {
 		const text = await buildDigest();
 		try {
 			await report(text);
-		} catch (e: any) {
+		} catch (e) {
 			state.queueUnsent(REPORT_TO, text, REPORT_TTL_MS);
-			log(`digest send failed, queued: ${e?.message ?? e}`);
+			log(`digest send failed, queued: ${errorMessage(e)}`);
 		}
 	};
 

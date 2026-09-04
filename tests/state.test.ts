@@ -1,4 +1,5 @@
 // tests/state.test.ts
+import type { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
@@ -91,7 +92,7 @@ test("pruneJournal removes only rows past retention", () => {
 	const s = new MonitorState(":memory:");
 	s.journal("finding", { old: true });
 	// Backdate the row well past a 1 ms retention window.
-	(s as any).db.query("UPDATE journal SET ts_ms = ts_ms - 100000").run();
+	(s as unknown as { db: Database }).db.query("UPDATE journal SET ts_ms = ts_ms - 100000").run();
 	s.journal("finding", { fresh: true });
 	const removed = s.pruneJournal(50_000);
 	expect(removed).toBe(1);

@@ -1,6 +1,13 @@
 // scripts/monitor/checks/logs.ts
-import { DescribeLogGroupsCommand, FilterLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
+
 import * as crypto from "node:crypto";
+import {
+	DescribeLogGroupsCommand,
+	type DescribeLogGroupsCommandOutput,
+	FilterLogEventsCommand,
+	type FilterLogEventsCommandOutput,
+} from "@aws-sdk/client-cloudwatch-logs";
+import { errorMessage } from "../errors.ts";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";
@@ -72,9 +79,9 @@ export async function checkLogs(
 	const groups: string[] = [];
 	let nextToken: string | undefined;
 	do {
-		const resp: any = await client.send(
+		const resp = (await client.send(
 			new DescribeLogGroupsCommand({ limit: 50, nextToken }),
-		);
+		)) as DescribeLogGroupsCommandOutput;
 		for (const g of resp.logGroups ?? []) {
 			const name = g.logGroupName;
 			if (!name) continue;
@@ -92,18 +99,18 @@ export async function checkLogs(
 	for (const group of groups) {
 		const wmKey = `logs:${group}`;
 		const since = state.getWatermark(wmKey) ?? now - lookbackMs;
-		let resp: any;
+		let resp: FilterLogEventsCommandOutput;
 		try {
-			resp = await client.send(
+			resp = (await client.send(
 				new FilterLogEventsCommand({
 					logGroupName: group,
 					startTime: since,
 					endTime: now,
 					filterPattern,
 				}),
-			);
-		} catch (e: any) {
-			const msg = String(e?.message ?? e);
+			)) as FilterLogEventsCommandOutput;
+		} catch (e) {
+			const msg = errorMessage(e);
 			if (/not authorized|AccessDenied|UnauthorizedOperation/i.test(msg)) {
 				const scopeKey = `logs:scope:${group}:`;
 				if (state.shouldAlert(scopeKey)) {
@@ -123,7 +130,8 @@ export async function checkLogs(
 			}
 			continue;
 		}
-		const events: { timestamp: number; message: string }[] = resp.events ?? [];
+		// FilteredLogEvent marks both fields optional; every real event carries them.
+		const events = (resp.events ?? []) as { timestamp: number; message: string }[];
 		if (events.length === 0) continue;
 
 		let maxTs = since;
