@@ -106,3 +106,48 @@ test("mixed schema and plain inbounds each get their own treatment", () => {
 		{ msg_id: "schema", response: obj, error: null },
 	]);
 });
+
+// SIO-1625: the agent_end text extraction and the claim-before-post step
+// moved out of the extension so they can be tested here.
+import { claimTurnReplies, lastAssistantText } from "../extensions/turnReply";
+
+test("lastAssistantText takes the latest assistant message and joins its text blocks", () => {
+	const messages = [
+		{ role: "user", content: "question" },
+		{ role: "assistant", content: "first answer" },
+		{ role: "toolResult", content: [{ type: "text", text: "tool output" }] },
+		{
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "private" },
+				{ type: "text", text: "final" },
+				{ type: "toolCall", name: "bash" },
+				{ type: "text", text: "answer" },
+			],
+		},
+	];
+	expect(lastAssistantText(messages)).toBe("final\nanswer");
+});
+
+test("lastAssistantText accepts string content and returns empty when no assistant spoke", () => {
+	expect(lastAssistantText([{ role: "assistant", content: "plain" }])).toBe("plain");
+	expect(lastAssistantText([{ role: "user", content: "only me" }])).toBe("");
+	expect(lastAssistantText([{ role: "assistant", content: [{ type: "text", text: 42 }] }])).toBe("");
+});
+
+test("claimTurnReplies replies once per unfulfilled inbound and empties the queue", () => {
+	const queue = new Map([
+		["M1", { msg_id: "M1", fulfilled: false, hops: 0 }],
+		["M2", { msg_id: "M2", fulfilled: true, hops: 0 }],
+		["M3", { msg_id: "M3", fulfilled: false, hops: 1, response_schema: { type: "object" } }],
+	]);
+	const replies = claimTurnReplies(queue, '{"ok":true}');
+	expect(replies.map((r) => r.msg_id)).toEqual(["M1", "M3"]);
+	expect(replies[1]?.response).toEqual({ ok: true });
+	expect(queue.has("M1")).toBe(false);
+	expect(queue.has("M3")).toBe(false);
+	// The already-fulfilled entry is left alone for its owner to drop.
+	expect(queue.get("M2")?.fulfilled).toBe(true);
+	// A second agent_end for the same turn has nothing left to submit.
+	expect(claimTurnReplies(queue, "later text")).toEqual([]);
+});
