@@ -16,8 +16,14 @@ describe("hub request validation", () => {
 	test("a project name that is not a plain directory name is 400", async () => {
 		const hub = await startHub();
 		const r = await api(hub, "POST", "/v1/agents/register", {
-			project: "../../evil", session_id: "S1", name: "x", purpose: "",
-			model: "t", color: "#888888", cwd: "/tmp", explicit: false,
+			project: "../../evil",
+			session_id: "S1",
+			name: "x",
+			purpose: "",
+			model: "t",
+			color: "#888888",
+			cwd: "/tmp",
+			explicit: false,
 		});
 		expect(r.status).toBe(400);
 		expect(((await r.json()) as ErrorResponse).error).toBe("invalid_project");
@@ -37,8 +43,14 @@ describe("hub request validation", () => {
 		const hub = await startHub(undefined, { PI_COMS_NET_MAX_BODY_BYTES: "65536" });
 		await register(hub, "S1", "a");
 		const r = await api(hub, "POST", "/v1/messages", {
-			project: "default", sender_session: "S1", target: "a", target_session: null,
-			prompt: "x".repeat(70_000), conversation_id: null, response_schema: null, hops: 0,
+			project: "default",
+			sender_session: "S1",
+			target: "a",
+			target_session: null,
+			prompt: "x".repeat(70_000),
+			conversation_id: null,
+			response_schema: null,
+			hops: 0,
 		});
 		expect(r.status).toBe(413);
 	});

@@ -15,8 +15,7 @@ export function makeSseParser(onEvent: SseHandler): SseParser {
 	return {
 		feed(chunk: Uint8Array | string): void {
 			buf += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true });
-			let idx: number;
-			while ((idx = buf.indexOf("\n\n")) >= 0) {
+			for (let idx = buf.indexOf("\n\n"); idx >= 0; idx = buf.indexOf("\n\n")) {
 				const frame = buf.slice(0, idx);
 				buf = buf.slice(idx + 2);
 				let event = "message";
@@ -38,8 +37,16 @@ export function makeSseParser(onEvent: SseHandler): SseParser {
 				if (dataLines.length > 0) {
 					const joined = dataLines.join("\n");
 					let data: unknown = joined;
-					try { data = JSON.parse(joined); } catch { /* keep as string */ }
-					try { onEvent(event, data, id); } catch { /* ignore handler errors */ }
+					try {
+						data = JSON.parse(joined);
+					} catch {
+						/* keep as string */
+					}
+					try {
+						onEvent(event, data, id);
+					} catch {
+						/* ignore handler errors */
+					}
 				}
 			}
 		},

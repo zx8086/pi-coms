@@ -1,6 +1,6 @@
 // tests/monitor-cycle.test.ts
 import { describe, expect, test } from "bun:test";
-import { investigateBudgetMs, makeGuard, runCycle, type CycleDeps } from "../scripts/coms-net-monitor.ts";
+import { type CycleDeps, investigateBudgetMs, makeGuard, runCycle } from "../scripts/coms-net-monitor.ts";
 import type { Finding } from "../scripts/monitor/report.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 

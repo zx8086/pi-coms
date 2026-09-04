@@ -42,10 +42,7 @@ const SERVER_URL_ENV = process.env.PI_COMS_NET_SERVER_URL;
 const AUTH_TOKEN_ENV = process.env.PI_COMS_NET_AUTH_TOKEN;
 const PROJECT_ENV = process.env.PI_COMS_NET_PROJECT;
 
-const FALLBACK_PALETTE = [
-	"#72F1B8", "#36F9F6", "#FF7EDB", "#FEDE5D",
-	"#C792EA", "#FF8B39", "#4D9DE0", "#FFAA8B",
-];
+const FALLBACK_PALETTE = ["#72F1B8", "#36F9F6", "#FF7EDB", "#FEDE5D", "#C792EA", "#FF8B39", "#4D9DE0", "#FFAA8B"];
 
 // ━━ Shared types (canonical block — mirrored on server) ━━━━━━━━━━━━━━━━━━━
 
@@ -296,7 +293,7 @@ function isValidHex(hex: string): boolean {
 
 function fallbackColor(sessionId: string): string {
 	const h = crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 8);
-	return FALLBACK_PALETTE[Number(BigInt("0x" + h)) % FALLBACK_PALETTE.length];
+	return FALLBACK_PALETTE[Number(BigInt(`0x${h}`)) % FALLBACK_PALETTE.length];
 }
 
 function parseFrontmatter(raw: string): { name?: string; description?: string; color?: string; body: string } {
@@ -406,7 +403,7 @@ function resolveServerUrl(project: string, cliFlag: string | undefined): string 
 	if (cliFlag && cliFlag.length > 0) return cliFlag.replace(/\/+$/, "");
 	if (SERVER_URL_ENV && SERVER_URL_ENV.length > 0) return SERVER_URL_ENV.replace(/\/+$/, "");
 	const sj = readServerJson(project);
-	if (sj && sj.local_url) return sj.local_url.replace(/\/+$/, "");
+	if (sj?.local_url) return sj.local_url.replace(/\/+$/, "");
 	return null;
 }
 
@@ -455,7 +452,8 @@ export default function (pi: ExtensionAPI) {
 	// ━━ Identity flags ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	// Agent name flag is `--cname`: pi's harness owns `--name` and resumes it.
 	pi.registerFlag("cname", {
-		description: "Override coms-net agent name (otherwise from frontmatter or auto-generated). Distinct from pi's own --name, which the harness owns and resumes.",
+		description:
+			"Override coms-net agent name (otherwise from frontmatter or auto-generated). Distinct from pi's own --name, which the harness owns and resumes.",
 		type: "string",
 		default: undefined,
 	});
@@ -533,13 +531,18 @@ export default function (pi: ExtensionAPI) {
 
 	// ━━ HTTP helper ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-	async function httpFetch<T = unknown>(method: string, urlPath: string, body?: unknown, opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<T> {
+	async function httpFetch<T = unknown>(
+		method: string,
+		urlPath: string,
+		body?: unknown,
+		opts?: { timeoutMs?: number; signal?: AbortSignal },
+	): Promise<T> {
 		if (!serverUrl) throw new Error("coms-net: no server URL");
 		if (!authToken) throw new Error("coms-net: no auth token");
 		const url = serverUrl + urlPath;
 		const headers: Record<string, string> = {
-			"Authorization": `Bearer ${authToken}`,
-			"Accept": "application/json",
+			Authorization: `Bearer ${authToken}`,
+			Accept: "application/json",
 		};
 		const init: RequestInit = { method, headers };
 		if (body !== undefined) {
@@ -550,22 +553,44 @@ export default function (pi: ExtensionAPI) {
 		// shutdown) is combined with the timeout rather than replacing it.
 		const ac = new AbortController();
 		const timeoutMs = opts?.timeoutMs ?? HTTP_TIMEOUT_MS;
-		const timer = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, timeoutMs);
-		try { timer.unref?.(); } catch { /* ignore */ }
+		const timer = setTimeout(() => {
+			try {
+				ac.abort();
+			} catch {
+				/* ignore */
+			}
+		}, timeoutMs);
+		try {
+			timer.unref?.();
+		} catch {
+			/* ignore */
+		}
 		init.signal = opts?.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal;
 		let resp: Response;
 		try {
 			resp = await fetch(url, init);
 		} catch (err) {
-			try { clearTimeout(timer); } catch { /* ignore */ }
+			try {
+				clearTimeout(timer);
+			} catch {
+				/* ignore */
+			}
 			if (opts?.signal?.aborted) throw new Error("coms-net: cancelled");
 			throw new Error(`coms-net: fetch failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
-		try { clearTimeout(timer); } catch { /* ignore */ }
+		try {
+			clearTimeout(timer);
+		} catch {
+			/* ignore */
+		}
 		const text = await resp.text();
 		let parsed: unknown = null;
 		if (text.length > 0) {
-			try { parsed = JSON.parse(text); } catch { parsed = text; }
+			try {
+				parsed = JSON.parse(text);
+			} catch {
+				parsed = text;
+			}
 		}
 		if (!resp.ok) {
 			throw new HttpError(resp.status, parsed, `HTTP ${resp.status} ${method} ${urlPath}`);
@@ -609,7 +634,9 @@ export default function (pi: ExtensionAPI) {
 			const file = path.join(dir, `${label.replace(/[^A-Za-z0-9_.-]/g, "_")}-${ulid()}.txt`);
 			fs.writeFileSync(file, text, "utf-8");
 			note += ` Full output saved to: ${file}`;
-		} catch { /* the truncated text still stands on its own */ }
+		} catch {
+			/* the truncated text still stands on its own */
+		}
 		return `${t.content}\n\n${note}]`;
 	}
 
@@ -617,7 +644,10 @@ export default function (pi: ExtensionAPI) {
 
 	function poolSnapshotKey(): string {
 		const arr = [...peerCards.values()]
-			.map(c => `${c.session_id}|${c.name}|${c.color}|${c.model}|${c.context_used_pct}|${c.queue_depth}|${c.status}|${c.purpose}|${c.explicit ? 1 : 0}`)
+			.map(
+				(c) =>
+					`${c.session_id}|${c.name}|${c.color}|${c.model}|${c.context_used_pct}|${c.queue_depth}|${c.status}|${c.purpose}|${c.explicit ? 1 : 0}`,
+			)
 			.sort();
 		return arr.join("\n");
 	}
@@ -735,7 +765,8 @@ export default function (pi: ExtensionAPI) {
 		const senderSession = typeof sender.session_id === "string" ? sender.session_id : "?";
 		const promptText = typeof data.prompt === "string" ? data.prompt : "";
 		const hops = typeof data.hops === "number" ? data.hops : 0;
-		const responseSchema = (data.response_schema && typeof data.response_schema === "object") ? data.response_schema : null;
+		const responseSchema =
+			data.response_schema && typeof data.response_schema === "object" ? data.response_schema : null;
 
 		// Mail is not conversation: mailbox-class messages (monitor reports,
 		// anything sent with a long ttl_ms) must never trigger an unrequested
@@ -754,7 +785,9 @@ export default function (pi: ExtensionAPI) {
 					},
 					{ deliverAs: "followUp", triggerTurn: false },
 				);
-			} catch { /* notice is best-effort */ }
+			} catch {
+				/* notice is best-effort */
+			}
 			try {
 				pi.appendEntry("coms-net-log", {
 					event: "mail_in",
@@ -762,7 +795,9 @@ export default function (pi: ExtensionAPI) {
 					msg_id,
 					sender: senderSession,
 				});
-			} catch { /* best-effort */ }
+			} catch {
+				/* best-effort */
+			}
 			return;
 		}
 
@@ -812,7 +847,9 @@ export default function (pi: ExtensionAPI) {
 					sender: senderSession,
 					hops,
 				});
-			} catch { /* best-effort */ }
+			} catch {
+				/* best-effort */
+			}
 		} catch (err) {
 			inboundQueue.delete(msg_id);
 			audit("prompt_in_failed", { msg_id, reason: safeError(err) });
@@ -827,7 +864,11 @@ export default function (pi: ExtensionAPI) {
 		const pending = pendingReplies.get(msg_id);
 		if (pending) {
 			pending.result = { response: responseVal, error: errVal };
-			try { pending.resolve(pending.result); } catch { /* ignore */ }
+			try {
+				pending.resolve(pending.result);
+			} catch {
+				/* ignore */
+			}
 			try {
 				pi.appendEntry("coms-net-log", {
 					event: "response_in",
@@ -835,7 +876,9 @@ export default function (pi: ExtensionAPI) {
 					msg_id,
 					error: errVal,
 				});
-			} catch { /* best-effort */ }
+			} catch {
+				/* best-effort */
+			}
 		} else {
 			audit("orphan_response", { msg_id });
 		}
@@ -846,14 +889,18 @@ export default function (pi: ExtensionAPI) {
 	async function openSse(): Promise<void> {
 		if (!serverUrl || !authToken || !sseUrlPath || !identity) return;
 		if (sseAbort) {
-			try { sseAbort.abort(); } catch { /* ignore */ }
+			try {
+				sseAbort.abort();
+			} catch {
+				/* ignore */
+			}
 		}
 		const ac = new AbortController();
 		sseAbort = ac;
 		const url = serverUrl + sseUrlPath;
 		const headers: Record<string, string> = {
-			"Authorization": `Bearer ${authToken}`,
-			"Accept": "text/event-stream",
+			Authorization: `Bearer ${authToken}`,
+			Accept: "text/event-stream",
 		};
 		let resp: Response;
 		try {
@@ -873,7 +920,9 @@ export default function (pi: ExtensionAPI) {
 		notifiedReconnectCap = false;
 		try {
 			pi.appendEntry("coms-net-log", { event: "sse_open", ts: nowIso(), url: sseUrlPath });
-		} catch { /* best-effort */ }
+		} catch {
+			/* best-effort */
+		}
 
 		const parser = makeSseParser((event, data, id) => handleSseEvent(event, data, id));
 		const reader = resp.body.getReader();
@@ -891,7 +940,11 @@ export default function (pi: ExtensionAPI) {
 			}
 			audit("sse_disconnect", { reason: safeError(err) });
 		} finally {
-			try { reader.releaseLock(); } catch { /* ignore */ }
+			try {
+				reader.releaseLock();
+			} catch {
+				/* ignore */
+			}
 		}
 		if (!shuttingDown) {
 			scheduleReconnect();
@@ -907,7 +960,11 @@ export default function (pi: ExtensionAPI) {
 		if (atCeiling && !notifiedReconnectCap) {
 			notifiedReconnectCap = true;
 			if (currentCtx?.hasUI) {
-				try { currentCtx.ui.notify("coms-net: reconnect backoff at ceiling", "warning"); } catch { /* ignore */ }
+				try {
+					currentCtx.ui.notify("coms-net: reconnect backoff at ceiling", "warning");
+				} catch {
+					/* ignore */
+				}
 			}
 		}
 		reconnectTimer = setTimeout(async () => {
@@ -920,7 +977,11 @@ export default function (pi: ExtensionAPI) {
 				scheduleReconnect();
 			}
 		}, backoff);
-		try { reconnectTimer.unref?.(); } catch { /* ignore */ }
+		try {
+			reconnectTimer.unref?.();
+		} catch {
+			/* ignore */
+		}
 	}
 
 	async function reRegisterAndOpen(): Promise<void> {
@@ -948,8 +1009,8 @@ export default function (pi: ExtensionAPI) {
 			cwd: identity.cwd,
 			explicit: identity.explicit,
 		};
-		const resp = await httpFetch("POST", "/v1/agents/register", req) as RegisterResponse;
-		if (!resp || !resp.agent) {
+		const resp = (await httpFetch("POST", "/v1/agents/register", req)) as RegisterResponse;
+		if (!resp?.agent) {
 			throw new Error("coms-net: malformed register response");
 		}
 		// Server may auto-suffix the name on collision.
@@ -962,7 +1023,9 @@ export default function (pi: ExtensionAPI) {
 					assigned: resp.agent.name,
 					project: identity.project,
 				});
-			} catch { /* best-effort */ }
+			} catch {
+				/* best-effort */
+			}
 			// Mail addressed to the requested name will not reach this session;
 			// the operator has to know, not just the audit log (SIO-1613).
 			if (ctx?.hasUI) {
@@ -971,7 +1034,9 @@ export default function (pi: ExtensionAPI) {
 						`coms-net: name "${identity.name}" was taken; registered as "${resp.agent.name}". Messages sent to "${identity.name}" will not reach you.`,
 						"warning",
 					);
-				} catch { /* ignore */ }
+				} catch {
+					/* ignore */
+				}
 			}
 			identity.name = resp.agent.name;
 		}
@@ -983,7 +1048,9 @@ export default function (pi: ExtensionAPI) {
 				name: identity.name,
 				project: identity.project,
 			});
-		} catch { /* best-effort */ }
+		} catch {
+			/* best-effort */
+		}
 		return resp;
 	}
 
@@ -1045,7 +1112,7 @@ export default function (pi: ExtensionAPI) {
 		if (!authToken) {
 			notify(
 				`coms-net: no auth token for project "${project}". Set PI_COMS_NET_AUTH_TOKEN or pass --auth-token. ` +
-				`If running a local server, ensure ~/.pi/coms-net/projects/${project}/server.secret.json exists with mode 0600.`,
+					`If running a local server, ensure ~/.pi/coms-net/projects/${project}/server.secret.json exists with mode 0600.`,
 				"error",
 			);
 			audit("boot_failed", { reason: "no_auth_token", project });
@@ -1058,7 +1125,7 @@ export default function (pi: ExtensionAPI) {
 		} catch (err) {
 			notify(
 				`coms-net: server unreachable at ${serverUrl} — ${safeError(err)}. ` +
-				`Start a hub with: bun scripts/coms-net-server.ts (from the pi-coms package) or check PI_COMS_NET_SERVER_URL`,
+					`Start a hub with: bun scripts/coms-net-server.ts (from the pi-coms package) or check PI_COMS_NET_SERVER_URL`,
 				"error",
 			);
 			audit("boot_failed", { reason: "health_failed", error: safeError(err) });
@@ -1070,10 +1137,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			reg = await registerAgent();
 		} catch (err) {
-			notify(
-				`coms-net: register failed — ${safeError(err)}`,
-				"error",
-			);
+			notify(`coms-net: register failed — ${safeError(err)}`, "error");
 			audit("boot_failed", { reason: "register_failed", error: safeError(err) });
 			return;
 		}
@@ -1089,7 +1153,9 @@ export default function (pi: ExtensionAPI) {
 				project: identity.project,
 				server_url: serverUrl,
 			});
-		} catch { /* best-effort */ }
+		} catch {
+			/* best-effort */
+		}
 
 		// 6b. Seed the agent's own coms name into context (SIO-1600). Uses the
 		// post-registration identity.name so a hub-renamed session (name2)
@@ -1104,7 +1170,9 @@ export default function (pi: ExtensionAPI) {
 				},
 				{ deliverAs: "followUp", triggerTurn: false },
 			);
-		} catch { /* best-effort; identity note is not load-critical */ }
+		} catch {
+			/* best-effort; identity note is not load-critical */
+		}
 
 		// 7. Install widget + status. Success is the default — only failures notify
 		// (status line + widget already convey the connected state).
@@ -1130,12 +1198,17 @@ export default function (pi: ExtensionAPI) {
 				model: ctxNow?.model?.id ?? identity.model,
 				status: "online",
 			};
-			httpFetch("POST", `/v1/agents/${encodeURIComponent(identity.session_id)}/heartbeat`, hbReq, { timeoutMs: 5_000 })
-				.catch((err) => {
-					audit("heartbeat_failed", { reason: safeError(err) });
-				});
+			httpFetch("POST", `/v1/agents/${encodeURIComponent(identity.session_id)}/heartbeat`, hbReq, {
+				timeoutMs: 5_000,
+			}).catch((err) => {
+				audit("heartbeat_failed", { reason: safeError(err) });
+			});
 		}, HEARTBEAT_MS);
-		try { heartbeatTimer.unref?.(); } catch { /* ignore */ }
+		try {
+			heartbeatTimer.unref?.();
+		} catch {
+			/* ignore */
+		}
 	});
 
 	// ━━ Pool widget rendering ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1180,28 +1253,21 @@ export default function (pi: ExtensionAPI) {
 			// "┏━ coms-net ━" prefix has 13 visible cells.
 			const remaining = safeWidth - 13 - rightTagVisLen - 1; // -1 for "┓"
 			if (identity && remaining >= 1) {
-				const rightTag =
-					theme.fg("dim", " ") +
-					hexFg(identity.color, identity.name) +
-					theme.fg("dim", " ━");
+				const rightTag = theme.fg("dim", " ") + hexFg(identity.color, identity.name) + theme.fg("dim", " ━");
 				const middle = theme.fg("dim", "━".repeat(remaining));
 				const right = theme.fg("dim", "┓");
 				topBorder = left + leftFill + middle + rightTag + right;
 			} else {
 				const fallbackRemaining = Math.max(0, safeWidth - 2 /* "┏━" */ - 10 /* " coms-net " */ - 1 /* "┓" */);
-				const right = theme.fg("dim", "━".repeat(fallbackRemaining) + "┓");
+				const right = theme.fg("dim", `${"━".repeat(fallbackRemaining)}┓`);
 				topBorder = left + right;
 			}
-			bottomBorder = theme.fg("dim", "┗" + "━".repeat(safeWidth - 2) + "┛");
+			bottomBorder = theme.fg("dim", `┗${"━".repeat(safeWidth - 2)}┛`);
 		}
 
 		if (rows.length === 0) {
 			const emptyMsg = theme.fg("muted", "no peers connected");
-			return [
-				topBorder,
-				truncateToWidth(theme.fg("dim", " ") + emptyMsg, width),
-				bottomBorder,
-			];
+			return [topBorder, truncateToWidth(theme.fg("dim", " ") + emptyMsg, width), bottomBorder];
 		}
 
 		rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -1216,7 +1282,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (r.stale) {
 				const dimRow = `✗ ${r.name.padEnd(12)} ${abbreviateModel(r.model).padEnd(14)} [${"-".repeat(15)}] ${pctLabel.padStart(4)}  —  ${r.purpose || ""}`;
-				out.push(truncateToWidth(" " + theme.fg("dim", dimRow), width));
+				out.push(truncateToWidth(` ${theme.fg("dim", dimRow)}`, width));
 				continue;
 			}
 
@@ -1227,11 +1293,11 @@ export default function (pi: ExtensionAPI) {
 				? theme.fg("dim", "-".repeat(15))
 				: hexFg(r.color, "#".repeat(filled)) + theme.fg("dim", "-".repeat(empty));
 			const bar = theme.fg("warning", "[") + barFill + theme.fg("warning", "]");
-			const pctPart = " " + theme.fg("accent", pctLabel.padStart(4));
+			const pctPart = ` ${theme.fg("accent", pctLabel.padStart(4))}`;
 			const sep = theme.fg("dim", "  —  ");
 			const purposePart = theme.fg("muted", r.purpose || "");
 
-			const line = " " + swatch + " " + namePart + " " + modelPart + " " + bar + pctPart + sep + purposePart;
+			const line = ` ${swatch} ${namePart} ${modelPart} ${bar}${pctPart}${sep}${purposePart}`;
 			out.push(truncateToWidth(line, width));
 		}
 
@@ -1242,12 +1308,16 @@ export default function (pi: ExtensionAPI) {
 	function installPoolWidget(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		try {
-			ctx.ui.setWidget("coms-net-pool", (_tui, theme) => ({
-				invalidate() {},
-				render(width: number): string[] {
-					return renderPool(width, theme);
-				},
-			}), { placement: "belowEditor" });
+			ctx.ui.setWidget(
+				"coms-net-pool",
+				(_tui, theme) => ({
+					invalidate() {},
+					render(width: number): string[] {
+						return renderPool(width, theme);
+					},
+				}),
+				{ placement: "belowEditor" },
+			);
 		} catch {
 			// non-fatal
 		}
@@ -1264,7 +1334,9 @@ export default function (pi: ExtensionAPI) {
 			"Set include_explicit=true to reveal agents launched with --explicit.",
 		parameters: Type.Object({
 			project: Type.Optional(Type.String({ description: "Project name (defaults to caller's project)." })),
-			include_explicit: Type.Optional(Type.Boolean({ description: "Include agents launched with --explicit. Default false." })),
+			include_explicit: Type.Optional(
+				Type.Boolean({ description: "Include agents launched with --explicit. Default false." }),
+			),
 		}),
 		async execute(_callId, params, signal) {
 			if (!identity) {
@@ -1275,15 +1347,19 @@ export default function (pi: ExtensionAPI) {
 			const qs = `?project=${encodeURIComponent(projectFilter)}&include_explicit=${includeExp ? "true" : "false"}`;
 			const resp = await httpFetch<AgentsResponse>("GET", `/v1/agents${qs}`, undefined, { signal });
 			const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
-			const peers = agents.filter(a => a.session_id !== identity!.session_id);
+			const mySession = identity.session_id;
+			const peers = agents.filter((a) => a.session_id !== mySession);
 
-			const lines = peers.length === 0
-				? "No peer agents found."
-				: peers.map((a) => {
-					const live = a.status === "online" ? "●" : a.status === "stale" ? "~" : "✗";
-					const ctxStr = typeof a.context_used_pct === "number" ? ` ${a.context_used_pct}%` : " ?%";
-					return `${live} ${a.name} (${abbreviateModel(a.model)})${ctxStr}${a.purpose ? ` — ${a.purpose}` : ""}`;
-				}).join("\n");
+			const lines =
+				peers.length === 0
+					? "No peer agents found."
+					: peers
+							.map((a) => {
+								const live = a.status === "online" ? "●" : a.status === "stale" ? "~" : "✗";
+								const ctxStr = typeof a.context_used_pct === "number" ? ` ${a.context_used_pct}%` : " ?%";
+								return `${live} ${a.name} (${abbreviateModel(a.model)})${ctxStr}${a.purpose ? ` — ${a.purpose}` : ""}`;
+							})
+							.join("\n");
 
 			return {
 				content: [{ type: "text" as const, text: `${peers.length} peer(s):\n${lines}` }],
@@ -1293,10 +1369,7 @@ export default function (pi: ExtensionAPI) {
 		renderCall(args, theme) {
 			const proj = args.project;
 			const filter = proj ? ` ${proj}` : "";
-			return new Text(
-				theme.fg("toolTitle", theme.bold("coms_net_list")) + theme.fg("dim", filter),
-				0, 0,
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("coms_net_list")) + theme.fg("dim", filter), 0, 0);
 		},
 		renderResult(result, options, theme) {
 			const details = result.details as ListDetails | undefined;
@@ -1305,14 +1378,19 @@ export default function (pi: ExtensionAPI) {
 			if (!options.expanded || agents.length === 0) {
 				return new Text(header, 0, 0);
 			}
-			const rows = agents.map((a) => {
-				const dot = a.status === "online" ? theme.fg("success", "●")
-					: a.status === "stale" ? theme.fg("warning", "~")
-					: theme.fg("error", "✗");
-				const pct = typeof a.context_used_pct === "number" ? `${a.context_used_pct}%` : "?%";
-				return `${dot} ${theme.fg("accent", a.name)} ${theme.fg("dim", abbreviateModel(a.model))} ${theme.fg("warning", pct)}`;
-			}).join("\n");
-			return new Text(header + "\n" + rows, 0, 0);
+			const rows = agents
+				.map((a) => {
+					const dot =
+						a.status === "online"
+							? theme.fg("success", "●")
+							: a.status === "stale"
+								? theme.fg("warning", "~")
+								: theme.fg("error", "✗");
+					const pct = typeof a.context_used_pct === "number" ? `${a.context_used_pct}%` : "?%";
+					return `${dot} ${theme.fg("accent", a.name)} ${theme.fg("dim", abbreviateModel(a.model))} ${theme.fg("warning", pct)}`;
+				})
+				.join("\n");
+			return new Text(`${header}\n${rows}`, 0, 0);
 		},
 	});
 
@@ -1337,8 +1415,15 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			target: Type.String({ description: "Peer name (preferred, scoped to your project) or session_id." }),
 			prompt: Type.String({ description: "The prompt to send." }),
-			response_schema: Type.Optional(Type.Any({ description: "Optional JSON Schema describing the expected response shape." })),
-			ttl_ms: Type.Optional(Type.Number({ description: "Optional TTL in ms. Beyond the server default (30 min) the message is queued durably for an offline peer name and delivered when it next registers. Capped by the server (default 14 days)." })),
+			response_schema: Type.Optional(
+				Type.Any({ description: "Optional JSON Schema describing the expected response shape." }),
+			),
+			ttl_ms: Type.Optional(
+				Type.Number({
+					description:
+						"Optional TTL in ms. Beyond the server default (30 min) the message is queued durably for an offline peer name and delivered when it next registers. Capped by the server (default 14 days).",
+				}),
+			),
 		}),
 		async execute(_callId, params) {
 			if (!identity) throw new Error("coms-net not initialised");
@@ -1362,7 +1447,7 @@ export default function (pi: ExtensionAPI) {
 
 			let resp: SendResponse;
 			try {
-				resp = await httpFetch("POST", "/v1/messages", req) as SendResponse;
+				resp = (await httpFetch("POST", "/v1/messages", req)) as SendResponse;
 			} catch (err) {
 				if (err instanceof HttpError) {
 					const detail = err.detail();
@@ -1394,26 +1479,31 @@ export default function (pi: ExtensionAPI) {
 					target_session,
 					hops,
 				});
-			} catch { /* best-effort */ }
+			} catch {
+				/* best-effort */
+			}
 
 			return {
-				content: [{
-					type: "text" as const,
-					text: `coms_net_send → ${params.target}\nmsg_id ${msg_id}\nstatus ${resp.status}\nhops ${hops}`,
-				}],
+				content: [
+					{
+						type: "text" as const,
+						text: `coms_net_send → ${params.target}\nmsg_id ${msg_id}\nstatus ${resp.status}\nhops ${hops}`,
+					},
+				],
 				details: { msg_id, target: params.target, target_session, status: resp.status, hops },
 			};
 		},
 		renderCall(args, theme) {
 			const tgt = args.target ?? "?";
 			const prompt = args.prompt ?? "";
-			const preview = prompt.length > 60 ? prompt.slice(0, 57) + "..." : prompt;
+			const preview = prompt.length > 60 ? `${prompt.slice(0, 57)}...` : prompt;
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_send ")) +
-				theme.fg("accent", tgt) +
-				theme.fg("dim", " — ") +
-				theme.fg("muted", preview),
-				0, 0,
+					theme.fg("accent", tgt) +
+					theme.fg("dim", " — ") +
+					theme.fg("muted", preview),
+				0,
+				0,
 			);
 		},
 		renderResult(result, _options, theme) {
@@ -1424,10 +1514,11 @@ export default function (pi: ExtensionAPI) {
 			}
 			return new Text(
 				theme.fg("success", "→ ") +
-				theme.fg("accent", d.target) +
-				theme.fg("dim", `  msg_id `) +
-				theme.fg("warning", d.msg_id),
-				0, 0,
+					theme.fg("accent", d.target) +
+					theme.fg("dim", `  msg_id `) +
+					theme.fg("warning", d.msg_id),
+				0,
+				0,
 			);
 		},
 	});
@@ -1450,7 +1541,7 @@ export default function (pi: ExtensionAPI) {
 			const msg_id = params.msg_id;
 			// Local SSE-resolved fast path.
 			const pending = pendingReplies.get(msg_id);
-			if (pending && pending.result) {
+			if (pending?.result) {
 				const r = pending.result;
 				const text = r.error
 					? `coms_net_get: error — ${r.error}`
@@ -1463,7 +1554,9 @@ export default function (pi: ExtensionAPI) {
 			// Fall back to server.
 			let resp: MessageStatusResponse;
 			try {
-				resp = await httpFetch<MessageStatusResponse>("GET", `/v1/messages/${encodeURIComponent(msg_id)}`, undefined, { signal });
+				resp = await httpFetch<MessageStatusResponse>("GET", `/v1/messages/${encodeURIComponent(msg_id)}`, undefined, {
+					signal,
+				});
 			} catch (err) {
 				if (err instanceof HttpError && err.status === 404) {
 					return {
@@ -1493,17 +1586,17 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall(args, theme) {
 			const id = args.msg_id ?? "?";
-			return new Text(
-				theme.fg("toolTitle", theme.bold("coms_net_get ")) + theme.fg("warning", id),
-				0, 0,
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("coms_net_get ")) + theme.fg("warning", id), 0, 0);
 		},
 		renderResult(result, _options, theme) {
 			const d = result.details as GetDetails | undefined;
 			const status = d?.status ?? "?";
-			const color = status === "complete" ? "success"
-				: status === "pending" || status === "queued" || status === "delivered" ? "warning"
-				: "error";
+			const color =
+				status === "complete"
+					? "success"
+					: status === "pending" || status === "queued" || status === "delivered"
+						? "warning"
+						: "error";
 			return new Text(theme.fg(color, status), 0, 0);
 		},
 	});
@@ -1523,7 +1616,9 @@ export default function (pi: ExtensionAPI) {
 			"Use since with a msg_id to fetch only newer messages. " +
 			"Listing bodies are previews; pass msg_id to read one message in full (e.g. a monitor incident report whose findings run past the preview).",
 		parameters: Type.Object({
-			name: Type.Optional(Type.String({ description: `Inbox name to read (default: the shared "${INBOX_NAME}" inbox).` })),
+			name: Type.Optional(
+				Type.String({ description: `Inbox name to read (default: the shared "${INBOX_NAME}" inbox).` }),
+			),
 			limit: Type.Optional(Type.Number({ description: "Maximum messages to return (default 10, server cap 100)." })),
 			since: Type.Optional(Type.String({ description: "Only messages newer than this msg_id (ascending)." })),
 			msg_id: Type.Optional(Type.String({ description: "Return only this message, with its full untruncated body." })),
@@ -1534,10 +1629,7 @@ export default function (pi: ExtensionAPI) {
 			const msgId = params.msg_id;
 			// A full-body read must find its target: search at the server cap
 			// unless the caller narrowed the fetch explicitly.
-			const limit =
-				typeof params.limit === "number" && params.limit > 0
-					? params.limit
-					: msgId ? 100 : 10;
+			const limit = typeof params.limit === "number" && params.limit > 0 ? params.limit : msgId ? 100 : 10;
 			const since = params.since;
 			const qs =
 				`?project=${encodeURIComponent(identity.project)}&name=${encodeURIComponent(name)}&limit=${limit}` +
@@ -1564,16 +1656,14 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall(args, theme) {
 			const n = args.name;
-			return new Text(
-				theme.fg("toolTitle", theme.bold("coms_net_inbox")) + theme.fg("dim", n ? ` ${n}` : ""),
-				0, 0,
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("coms_net_inbox")) + theme.fg("dim", n ? ` ${n}` : ""), 0, 0);
 		},
 		renderResult(result, _options, theme) {
 			const d = result.details as InboxDetails | undefined;
 			return new Text(
 				theme.fg("accent", `${d?.count ?? "?"} message(s)`) + theme.fg("dim", ` in ${d?.name ?? "inbox"}`),
-				0, 0,
+				0,
+				0,
 			);
 		},
 	});
@@ -1597,16 +1687,23 @@ export default function (pi: ExtensionAPI) {
 			"the target is still working.",
 		parameters: Type.Object({
 			msg_id: Type.String({ description: "msg_id returned by coms_net_send." }),
-			timeout_ms: Type.Optional(Type.Number({ description: "Override the default timeout (ms). Server cap applies. Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends." })),
+			timeout_ms: Type.Optional(
+				Type.Number({
+					description:
+						"Override the default timeout (ms). Server cap applies. Use minutes, not seconds, for prompts that make the target investigate — replies only arrive when its whole turn ends.",
+				}),
+			),
 		}),
 		async execute(_callId, params, signal) {
 			const msg_id = params.msg_id;
-			const timeoutMs = typeof params.timeout_ms === "number" && params.timeout_ms > 0
-				? params.timeout_ms
-				: MESSAGE_TIMEOUT_MS;
+			const timeoutMs =
+				typeof params.timeout_ms === "number" && params.timeout_ms > 0 ? params.timeout_ms : MESSAGE_TIMEOUT_MS;
 
 			const r = await awaitReplyResult(msg_id, timeoutMs, signal);
-			const details: { response: unknown; error: string | null } = { response: r.response ?? null, error: r.error ?? null };
+			const details: { response: unknown; error: string | null } = {
+				response: r.response ?? null,
+				error: r.error ?? null,
+			};
 			if (details.error) {
 				return {
 					content: [{ type: "text" as const, text: `coms_net_await: error — ${details.error}` }],
@@ -1621,10 +1718,7 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall(args, theme) {
 			const id = args.msg_id ?? "?";
-			return new Text(
-				theme.fg("toolTitle", theme.bold("coms_net_await ")) + theme.fg("warning", id),
-				0, 0,
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("coms_net_await ")) + theme.fg("warning", id), 0, 0);
 		},
 		renderResult(result, _options, theme) {
 			const d = result.details as AwaitDetails | undefined;
@@ -1639,12 +1733,14 @@ export default function (pi: ExtensionAPI) {
 	// survive, so coms_net_get still finds the reply afterwards.
 	async function awaitReplyResult(msg_id: string, timeoutMs: number, signal?: AbortSignal): Promise<ReplyResult> {
 		const pending = pendingReplies.get(msg_id);
-		if (pending && pending.result) return pending.result;
+		if (pending?.result) return pending.result;
 		if (signal?.aborted) return { response: null, error: "cancelled" };
 
 		const localPromise: Promise<ReplyResult> = pending
 			? pending.promise
-			: new Promise(() => { /* never resolves on its own; SSE will */ });
+			: new Promise(() => {
+					/* never resolves on its own; SSE will */
+				});
 
 		const serverTimeoutMs = Math.min(timeoutMs, MESSAGE_TIMEOUT_MS);
 		const ac = new AbortController();
@@ -1653,22 +1749,28 @@ export default function (pi: ExtensionAPI) {
 			`/v1/messages/${encodeURIComponent(msg_id)}/await?timeout_ms=${serverTimeoutMs}`,
 			undefined,
 			{ timeoutMs: serverTimeoutMs + 5_000, signal: ac.signal },
-		).then((data) => {
-			if (data?.status === "complete") return { response: data.response, error: null };
-			if (data?.status === "error") return { response: null, error: data.error ?? "error" };
-			if (data?.status === "timeout") return { response: null, error: "timeout" };
-			return { response: data?.response, error: data?.error ?? null };
-		}).catch((err) => {
-			if (err instanceof HttpError && err.status === 404) {
-				return { response: null, error: "unknown msg_id" };
-			}
-			return { response: null, error: safeError(err) };
-		});
+		)
+			.then((data) => {
+				if (data?.status === "complete") return { response: data.response, error: null };
+				if (data?.status === "error") return { response: null, error: data.error ?? "error" };
+				if (data?.status === "timeout") return { response: null, error: "timeout" };
+				return { response: data?.response, error: data?.error ?? null };
+			})
+			.catch((err) => {
+				if (err instanceof HttpError && err.status === 404) {
+					return { response: null, error: "unknown msg_id" };
+				}
+				return { response: null, error: safeError(err) };
+			});
 
 		let timer: ReturnType<typeof setTimeout> | null = null;
 		const timeoutPromise = new Promise<ReplyResult>((resolve) => {
 			timer = setTimeout(() => resolve({ response: null, error: "timeout" }), timeoutMs);
-			try { timer.unref?.(); } catch { /* ignore */ }
+			try {
+				timer.unref?.();
+			} catch {
+				/* ignore */
+			}
 		});
 
 		let onAbort: (() => void) | null = null;
@@ -1681,7 +1783,11 @@ export default function (pi: ExtensionAPI) {
 		try {
 			return await Promise.race([localPromise, serverPromise, timeoutPromise, abortPromise]);
 		} finally {
-			try { ac.abort(); } catch { /* ignore */ }
+			try {
+				ac.abort();
+			} catch {
+				/* ignore */
+			}
 			if (timer) clearTimeout(timer);
 			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 		}
@@ -1702,11 +1808,19 @@ export default function (pi: ExtensionAPI) {
 			"Replies happen automatically from your normal assistant text at end of turn.",
 		parameters: Type.Object({
 			prompt: Type.String({ description: "The prompt sent verbatim to each target." }),
-			targets: Type.Optional(Type.Array(Type.String(), { description: "Peer names. Defaults to all online/stale peers in the project." })),
-			timeout_ms: Type.Optional(Type.Number({ description: "Per-peer reply timeout (ms). Default 30 min. Use minutes, not seconds, for prompts that make peers investigate — replies only arrive when their whole turn ends." })),
+			targets: Type.Optional(
+				Type.Array(Type.String(), { description: "Peer names. Defaults to all online/stale peers in the project." }),
+			),
+			timeout_ms: Type.Optional(
+				Type.Number({
+					description:
+						"Per-peer reply timeout (ms). Default 30 min. Use minutes, not seconds, for prompts that make peers investigate — replies only arrive when their whole turn ends.",
+				}),
+			),
 		}),
 		async execute(_callId, params, signal) {
 			if (!identity) throw new Error("coms-net not initialised");
+			const me = identity;
 
 			const hops = outboundHops(inboundQueue.values());
 			if (hops >= MAX_HOPS) {
@@ -1714,18 +1828,20 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const prompt = params.prompt;
-			const timeoutMs = typeof params.timeout_ms === "number" && params.timeout_ms > 0
-				? params.timeout_ms
-				: MESSAGE_TIMEOUT_MS;
+			const timeoutMs =
+				typeof params.timeout_ms === "number" && params.timeout_ms > 0 ? params.timeout_ms : MESSAGE_TIMEOUT_MS;
 
 			// Resolve targets: explicit list, or every reachable peer in the project.
 			let targets: string[] = params.targets ?? [];
 			if (targets.length === 0) {
-				const resp = await httpFetch<AgentsResponse>("GET", `/v1/agents?project=${encodeURIComponent(identity.project)}&include_explicit=false`, undefined, { signal });
+				const resp = await httpFetch<AgentsResponse>(
+					"GET",
+					`/v1/agents?project=${encodeURIComponent(identity.project)}&include_explicit=false`,
+					undefined,
+					{ signal },
+				);
 				const agents: AgentCard[] = Array.isArray(resp?.agents) ? resp.agents : [];
-				targets = agents
-					.filter((a) => a.session_id !== identity!.session_id && a.status !== "offline")
-					.map((a) => a.name);
+				targets = agents.filter((a) => a.session_id !== me.session_id && a.status !== "offline").map((a) => a.name);
 			}
 			if (targets.length === 0) {
 				return {
@@ -1736,79 +1852,91 @@ export default function (pi: ExtensionAPI) {
 
 			// Fan out. A failed send to one peer becomes that peer's result, not a
 			// broadcast-wide failure.
-			const sends = await Promise.all(targets.map(async (target) => {
-				try {
-					const req: SendRequest = {
-						project: identity!.project,
-						sender_session: identity!.session_id,
-						target,
-						target_session: null,
-						prompt,
-						conversation_id: null,
-						response_schema: null,
-						hops,
-					};
-					const resp = await httpFetch("POST", "/v1/messages", req) as SendResponse;
-					let resolveFn!: (v: ReplyResult) => void;
-					const promise = new Promise<ReplyResult>((res) => {
-						resolveFn = res;
-					});
-					rememberPending(resp.msg_id, {
-						resolve: resolveFn,
-						promise,
-						target_name: target,
-						target_session: resp.target_session,
-						created_at: nowIso(),
-					});
+			const sends = await Promise.all(
+				targets.map(async (target) => {
 					try {
-						pi.appendEntry("coms-net-log", {
-							event: "prompt_out",
-							ts: nowIso(),
-							msg_id: resp.msg_id,
+						const req: SendRequest = {
+							project: me.project,
+							sender_session: me.session_id,
 							target,
-							target_session: resp.target_session,
+							target_session: null,
+							prompt,
+							conversation_id: null,
+							response_schema: null,
 							hops,
-							broadcast: true,
+						};
+						const resp = (await httpFetch("POST", "/v1/messages", req)) as SendResponse;
+						let resolveFn!: (v: ReplyResult) => void;
+						const promise = new Promise<ReplyResult>((res) => {
+							resolveFn = res;
 						});
-					} catch { /* best-effort */ }
-					return { target, msg_id: resp.msg_id as string | null, error: null as string | null };
-				} catch (err) {
-					const detail = err instanceof HttpError ? err.detail() : safeError(err);
-					return { target, msg_id: null as string | null, error: `send failed: ${detail}` };
-				}
-			}));
+						rememberPending(resp.msg_id, {
+							resolve: resolveFn,
+							promise,
+							target_name: target,
+							target_session: resp.target_session,
+							created_at: nowIso(),
+						});
+						try {
+							pi.appendEntry("coms-net-log", {
+								event: "prompt_out",
+								ts: nowIso(),
+								msg_id: resp.msg_id,
+								target,
+								target_session: resp.target_session,
+								hops,
+								broadcast: true,
+							});
+						} catch {
+							/* best-effort */
+						}
+						return { target, msg_id: resp.msg_id as string | null, error: null as string | null };
+					} catch (err) {
+						const detail = err instanceof HttpError ? err.detail() : safeError(err);
+						return { target, msg_id: null as string | null, error: `send failed: ${detail}` };
+					}
+				}),
+			);
 
 			// Gather every reply in parallel.
-			const results = await Promise.all(sends.map(async (s) => {
-				if (!s.msg_id) return { target: s.target, msg_id: null as string | null, response: null, error: s.error };
-				const r = await awaitReplyResult(s.msg_id, timeoutMs, signal);
-				return { target: s.target, msg_id: s.msg_id, response: r.response ?? null, error: r.error ?? null };
-			}));
+			const results = await Promise.all(
+				sends.map(async (s) => {
+					if (!s.msg_id) return { target: s.target, msg_id: null as string | null, response: null, error: s.error };
+					const r = await awaitReplyResult(s.msg_id, timeoutMs, signal);
+					return { target: s.target, msg_id: s.msg_id, response: r.response ?? null, error: r.error ?? null };
+				}),
+			);
 
 			const ok = results.filter((r) => !r.error).length;
-			const lines = results.map((r) => {
-				if (r.error) return `✗ ${r.target}: ${r.error}`;
-				const text = typeof r.response === "string" ? r.response : JSON.stringify(r.response, null, 2);
-				return `● ${r.target}:\n${text}`;
-			}).join("\n\n");
+			const lines = results
+				.map((r) => {
+					if (r.error) return `✗ ${r.target}: ${r.error}`;
+					const text = typeof r.response === "string" ? r.response : JSON.stringify(r.response, null, 2);
+					return `● ${r.target}:\n${text}`;
+				})
+				.join("\n\n");
 
 			return {
-				content: [{ type: "text" as const, text: clampToolText(`coms_net_broadcast: ${ok}/${results.length} replied\n\n${lines}`, "broadcast") }],
+				content: [
+					{
+						type: "text" as const,
+						text: clampToolText(`coms_net_broadcast: ${ok}/${results.length} replied\n\n${lines}`, "broadcast"),
+					},
+				],
 				details: { results, hops, replied: ok, total: results.length },
 			};
 		},
 		renderCall(args, theme) {
-			const tgts = Array.isArray(args.targets) && args.targets.length > 0
-				? args.targets.join(", ")
-				: "all peers";
+			const tgts = Array.isArray(args.targets) && args.targets.length > 0 ? args.targets.join(", ") : "all peers";
 			const prompt = args.prompt ?? "";
-			const preview = prompt.length > 50 ? prompt.slice(0, 47) + "..." : prompt;
+			const preview = prompt.length > 50 ? `${prompt.slice(0, 47)}...` : prompt;
 			return new Text(
 				theme.fg("toolTitle", theme.bold("coms_net_broadcast ")) +
-				theme.fg("accent", tgts) +
-				theme.fg("dim", " — ") +
-				theme.fg("muted", preview),
-				0, 0,
+					theme.fg("accent", tgts) +
+					theme.fg("dim", " — ") +
+					theme.fg("muted", preview),
+				0,
+				0,
 			);
 		},
 		renderResult(result, options, theme) {
@@ -1822,12 +1950,14 @@ export default function (pi: ExtensionAPI) {
 			if (!options.expanded || !Array.isArray(d.results) || d.results.length === 0) {
 				return new Text(header, 0, 0);
 			}
-			const rows = d.results.map((r) => {
-				const dot = r.error ? theme.fg("error", "✗") : theme.fg("success", "●");
-				const tail = r.error ? theme.fg("error", r.error) : theme.fg("dim", `msg_id ${r.msg_id}`);
-				return `${dot} ${theme.fg("accent", r.target)} ${tail}`;
-			}).join("\n");
-			return new Text(header + "\n" + rows, 0, 0);
+			const rows = d.results
+				.map((r) => {
+					const dot = r.error ? theme.fg("error", "✗") : theme.fg("success", "●");
+					const tail = r.error ? theme.fg("error", r.error) : theme.fg("dim", `msg_id ${r.msg_id}`);
+					return `${dot} ${theme.fg("accent", r.target)} ${tail}`;
+				})
+				.join("\n");
+			return new Text(`${header}\n${rows}`, 0, 0);
 		},
 	});
 
@@ -1843,27 +1973,31 @@ export default function (pi: ExtensionAPI) {
 		const replies = claimTurnReplies(inboundQueue, lastAssistantText(event.messages));
 		const project = identity.project;
 		const responderSession = identity.session_id;
-		await Promise.all(replies.map(async (reply) => {
-			const req: ResponseSubmitRequest = {
-				project,
-				responder_session: responderSession,
-				response: reply.response,
-				error: reply.error,
-			};
-			try {
-				await httpFetch("POST", `/v1/messages/${encodeURIComponent(reply.msg_id)}/response`, req);
+		await Promise.all(
+			replies.map(async (reply) => {
+				const req: ResponseSubmitRequest = {
+					project,
+					responder_session: responderSession,
+					response: reply.response,
+					error: reply.error,
+				};
 				try {
-					pi.appendEntry("coms-net-log", {
-						event: "response_out",
-						ts: nowIso(),
-						msg_id: reply.msg_id,
-						error: reply.error,
-					});
-				} catch { /* best-effort */ }
-			} catch (e) {
-				audit("response_out_failed", { msg_id: reply.msg_id, reason: safeError(e) });
-			}
-		}));
+					await httpFetch("POST", `/v1/messages/${encodeURIComponent(reply.msg_id)}/response`, req);
+					try {
+						pi.appendEntry("coms-net-log", {
+							event: "response_out",
+							ts: nowIso(),
+							msg_id: reply.msg_id,
+							error: reply.error,
+						});
+					} catch {
+						/* best-effort */
+					}
+				} catch (e) {
+					audit("response_out_failed", { msg_id: reply.msg_id, reason: safeError(e) });
+				}
+			}),
+		);
 	});
 
 	// ━━ /coms-net slash command ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1874,12 +2008,24 @@ export default function (pi: ExtensionAPI) {
 			const trimmed = (args ?? "").trim();
 			if (trimmed.includes("--all")) {
 				includeExplicit = !includeExplicit;
-				try { ctx.ui.notify(`coms-net: include_explicit = ${includeExplicit}`, "info"); } catch { /* ignore */ }
+				try {
+					ctx.ui.notify(`coms-net: include_explicit = ${includeExplicit}`, "info");
+				} catch {
+					/* ignore */
+				}
 			}
 			if (trimmed.includes("--reconnect")) {
-				try { ctx.ui.notify("coms-net: reconnecting SSE...", "info"); } catch { /* ignore */ }
+				try {
+					ctx.ui.notify("coms-net: reconnecting SSE...", "info");
+				} catch {
+					/* ignore */
+				}
 				if (sseAbort) {
-					try { sseAbort.abort(); } catch { /* ignore */ }
+					try {
+						sseAbort.abort();
+					} catch {
+						/* ignore */
+					}
 					sseAbort = null;
 				}
 				// A scheduled reconnect must not race the manual one.
@@ -1889,7 +2035,11 @@ export default function (pi: ExtensionAPI) {
 				}
 				reconnectAttempts = 0;
 				notifiedReconnectCap = false;
-				try { await reRegisterAndOpen(); } catch (err) { audit("manual_reconnect_failed", { reason: safeError(err) }); }
+				try {
+					await reRegisterAndOpen();
+				} catch (err) {
+					audit("manual_reconnect_failed", { reason: safeError(err) });
+				}
 			}
 			if (trimmed.includes("--server")) {
 				try {
@@ -1905,7 +2055,11 @@ export default function (pi: ExtensionAPI) {
 			const projectMatch = trimmed.match(/--project\s+(\S+)/);
 			if (projectMatch) {
 				displayProject = projectMatch[1];
-				try { ctx.ui.notify(`coms-net: displaying project ${displayProject}`, "info"); } catch { /* ignore */ }
+				try {
+					ctx.ui.notify(`coms-net: displaying project ${displayProject}`, "info");
+				} catch {
+					/* ignore */
+				}
 			}
 
 			// Bare invocation or after --project: force-refresh.
@@ -1933,23 +2087,45 @@ export default function (pi: ExtensionAPI) {
 		shuttingDown = true;
 
 		if (heartbeatTimer) {
-			try { clearInterval(heartbeatTimer); } catch { /* ignore */ }
+			try {
+				clearInterval(heartbeatTimer);
+			} catch {
+				/* ignore */
+			}
 			heartbeatTimer = null;
 		}
 		if (reconnectTimer) {
-			try { clearTimeout(reconnectTimer); } catch { /* ignore */ }
+			try {
+				clearTimeout(reconnectTimer);
+			} catch {
+				/* ignore */
+			}
 			reconnectTimer = null;
 		}
 		if (sseAbort) {
-			try { sseAbort.abort(); } catch { /* ignore */ }
+			try {
+				sseAbort.abort();
+			} catch {
+				/* ignore */
+			}
 			sseAbort = null;
 		}
 
 		// Best-effort DELETE with short timeout.
 		if (identity && serverUrl && authToken) {
 			const ac = new AbortController();
-			const t = setTimeout(() => { try { ac.abort(); } catch { /* ignore */ } }, SHUTDOWN_DELETE_TIMEOUT_MS);
-			try { t.unref?.(); } catch { /* ignore */ }
+			const t = setTimeout(() => {
+				try {
+					ac.abort();
+				} catch {
+					/* ignore */
+				}
+			}, SHUTDOWN_DELETE_TIMEOUT_MS);
+			try {
+				t.unref?.();
+			} catch {
+				/* ignore */
+			}
 			try {
 				await httpFetch(
 					"DELETE",
@@ -1960,7 +2136,11 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				// best-effort — server may already be gone.
 			} finally {
-				try { clearTimeout(t); } catch { /* ignore */ }
+				try {
+					clearTimeout(t);
+				} catch {
+					/* ignore */
+				}
 			}
 		}
 
@@ -1971,15 +2151,27 @@ export default function (pi: ExtensionAPI) {
 					ts: nowIso(),
 					session_id: identity.session_id,
 				});
-			} catch { /* best-effort */ }
+			} catch {
+				/* best-effort */
+			}
 		}
 
 		if (currentCtx?.hasUI) {
-			try { currentCtx.ui.setWidget("coms-net-pool", undefined); } catch { /* ignore */ }
-			try { currentCtx.ui.setStatus("coms-net", undefined); } catch { /* ignore */ }
+			try {
+				currentCtx.ui.setWidget("coms-net-pool", undefined);
+			} catch {
+				/* ignore */
+			}
+			try {
+				currentCtx.ui.setStatus("coms-net", undefined);
+			} catch {
+				/* ignore */
+			}
 		}
 	}
 
 	// Pi emits session_shutdown itself on Ctrl+C, SIGHUP and SIGTERM.
-	pi.on("session_shutdown", async () => { await cleanShutdown(); });
+	pi.on("session_shutdown", async () => {
+		await cleanShutdown();
+	});
 }

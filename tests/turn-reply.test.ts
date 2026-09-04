@@ -58,17 +58,21 @@ test("outboundHops is 0 for a user-started turn", () => {
 });
 
 test("outboundHops is one past the deepest unfulfilled inbound", () => {
-	expect(outboundHops([
-		{ hops: 4, fulfilled: false },
-		{ hops: 0, fulfilled: false },
-	])).toBe(5);
+	expect(
+		outboundHops([
+			{ hops: 4, fulfilled: false },
+			{ hops: 0, fulfilled: false },
+		]),
+	).toBe(5);
 });
 
 test("outboundHops ignores fulfilled inbounds", () => {
-	expect(outboundHops([
-		{ hops: 4, fulfilled: true },
-		{ hops: 1, fulfilled: false },
-	])).toBe(2);
+	expect(
+		outboundHops([
+			{ hops: 4, fulfilled: true },
+			{ hops: 1, fulfilled: false },
+		]),
+	).toBe(2);
 	expect(outboundHops([{ hops: 4, fulfilled: true }])).toBe(0);
 });
 
@@ -76,7 +80,7 @@ test("schema inbound gets JSON extracted from fenced output", () => {
 	const obj = { verdict: "clean" };
 	const replies = buildTurnReplies(
 		[{ msg_id: "m1", fulfilled: false, response_schema: { type: "object" } }],
-		"Here you go:\n```json\n" + JSON.stringify(obj) + "\n```",
+		`Here you go:\n\`\`\`json\n${JSON.stringify(obj)}\n\`\`\``,
 	);
 	expect(replies).toEqual([{ msg_id: "m1", response: obj, error: null }]);
 });
@@ -86,9 +90,7 @@ test("schema inbound with non-JSON text reports the extraction error", () => {
 		[{ msg_id: "m1", fulfilled: false, response_schema: { type: "object" } }],
 		"sorry, plain prose only",
 	);
-	expect(replies).toEqual([
-		{ msg_id: "m1", response: null, error: "response not valid JSON" },
-	]);
+	expect(replies).toEqual([{ msg_id: "m1", response: null, error: "response not valid JSON" }]);
 });
 
 test("mixed schema and plain inbounds each get their own treatment", () => {

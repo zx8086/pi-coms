@@ -1,10 +1,11 @@
 // tests/inbox.test.ts
-import { afterAll, describe, expect, test } from "bun:test";
+
 import { Database } from "bun:sqlite";
+import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MailStore, type ComsMessage } from "../scripts/coms-net-server.ts";
+import { type ComsMessage, MailStore } from "../scripts/coms-net-server.ts";
 
 const tmpDirs: string[] = [];
 afterAll(() => {
@@ -69,11 +70,13 @@ describe("MailStore inbox", () => {
 	test("terminal mailbox rows are listed; purgeExpired removes only past-expiry rows", () => {
 		const store = new MailStore(tmpDb());
 		store.upsert(msg({ prompt: "done", status: "complete", completed_at: new Date().toISOString() }));
-		store.upsert(msg({
-			prompt: "old",
-			status: "complete",
-			expires_at: new Date(Date.now() - 1_000).toISOString(),
-		}));
+		store.upsert(
+			msg({
+				prompt: "old",
+				status: "complete",
+				expires_at: new Date(Date.now() - 1_000).toISOString(),
+			}),
+		);
 		store.upsert(msg({ prompt: "live" }));
 		expect(store.inbox("ops", 10).map((m) => m.prompt)).toEqual(["done", "old", "live"]);
 		store.purgeExpired();
@@ -84,9 +87,27 @@ describe("MailStore inbox", () => {
 	test("completed conversations are listed for their target with the reply; in-flight ones are not (SIO-1620)", () => {
 		const store = new MailStore(tmpDb());
 		const done = new Date().toISOString();
-		store.upsert(msg({ target_name: "eu-oit-dev", mailbox: false, prompt: "how many RDS?", status: "complete", response: "three", completed_at: done }));
+		store.upsert(
+			msg({
+				target_name: "eu-oit-dev",
+				mailbox: false,
+				prompt: "how many RDS?",
+				status: "complete",
+				response: "three",
+				completed_at: done,
+			}),
+		);
 		store.upsert(msg({ target_name: "eu-oit-dev", mailbox: false, prompt: "still thinking", status: "delivered" }));
-		store.upsert(msg({ target_name: "eu-oit-dev", mailbox: false, prompt: "never answered", status: "error", error: "expired", completed_at: done }));
+		store.upsert(
+			msg({
+				target_name: "eu-oit-dev",
+				mailbox: false,
+				prompt: "never answered",
+				status: "error",
+				error: "expired",
+				completed_at: done,
+			}),
+		);
 		const rows = store.inbox("eu-oit-dev", 10);
 		expect(rows.map((r) => [r.prompt, r.status, r.response, r.error])).toEqual([
 			["how many RDS?", "complete", "three", null],
@@ -102,8 +123,26 @@ describe("MailStore inbox", () => {
 		const recent = new Date(Date.now() - 86_400_000).toISOString();
 		// interactive rows expire (expires_at) 30 min after creation; retention must not look at that
 		const expired = new Date(Date.now() - 3_600_000).toISOString();
-		store.upsert(msg({ target_name: "agent", mailbox: false, prompt: "old", status: "complete", completed_at: old, expires_at: expired }));
-		store.upsert(msg({ target_name: "agent", mailbox: false, prompt: "recent", status: "complete", completed_at: recent, expires_at: expired }));
+		store.upsert(
+			msg({
+				target_name: "agent",
+				mailbox: false,
+				prompt: "old",
+				status: "complete",
+				completed_at: old,
+				expires_at: expired,
+			}),
+		);
+		store.upsert(
+			msg({
+				target_name: "agent",
+				mailbox: false,
+				prompt: "recent",
+				status: "complete",
+				completed_at: recent,
+				expires_at: expired,
+			}),
+		);
 		store.purgeExpired(14 * 86_400_000);
 		expect(store.inbox("agent", 10).map((r) => r.prompt)).toEqual(["recent"]);
 		store.close();
@@ -111,11 +150,13 @@ describe("MailStore inbox", () => {
 
 	test("purgeExpired leaves non-terminal rows to the live sweep", () => {
 		const store = new MailStore(tmpDb());
-		store.upsert(msg({
-			prompt: "queued-past-expiry",
-			status: "queued",
-			expires_at: new Date(Date.now() - 1_000).toISOString(),
-		}));
+		store.upsert(
+			msg({
+				prompt: "queued-past-expiry",
+				status: "queued",
+				expires_at: new Date(Date.now() - 1_000).toISOString(),
+			}),
+		);
 		store.purgeExpired();
 		// still present: expiring queued mail is the server sweep's job (it marks
 		// the in-memory message expired first)
@@ -134,9 +175,20 @@ describe("MailStore inbox", () => {
 			status TEXT NOT NULL, response TEXT, error TEXT, created_at TEXT NOT NULL,
 			delivered_at TEXT, completed_at TEXT, expires_at TEXT NOT NULL
 		)`);
-		raw.query(
-			"INSERT INTO messages (msg_id, project, sender_session, target_name, prompt, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		).run("OLDROW", "default", "S1", "ops", "legacy", "queued", new Date().toISOString(), new Date(Date.now() + 60_000).toISOString());
+		raw
+			.query(
+				"INSERT INTO messages (msg_id, project, sender_session, target_name, prompt, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			)
+			.run(
+				"OLDROW",
+				"default",
+				"S1",
+				"ops",
+				"legacy",
+				"queued",
+				new Date().toISOString(),
+				new Date(Date.now() + 60_000).toISOString(),
+			);
 		raw.close();
 
 		const store = new MailStore(dbPath);

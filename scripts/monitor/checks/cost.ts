@@ -44,13 +44,15 @@ export async function checkCost(
 	const key = `cost:${yesterday}`;
 	if (!state.shouldAlert(key)) return [];
 	state.markAlerted(key, "cost");
-	return [{
-		family: "cost",
-		severity: "warn",
-		resource: "account",
-		summary: `Spend ${yesterday} was $${latest.usd.toFixed(2)} vs 14d baseline $${baseline.toFixed(2)} (+${((latest.usd / baseline - 1) * 100).toFixed(0)} pct)`,
-		dedup_key: key,
-		evidence: { date: yesterday, usd: latest.usd, baseline },
-		at: now.toISOString(),
-	}];
+	return [
+		{
+			family: "cost",
+			severity: "warn",
+			resource: "account",
+			summary: `Spend ${yesterday} was $${latest.usd.toFixed(2)} vs 14d baseline $${baseline.toFixed(2)} (+${((latest.usd / baseline - 1) * 100).toFixed(0)} pct)`,
+			dedup_key: key,
+			evidence: { date: yesterday, usd: latest.usd, baseline },
+			at: now.toISOString(),
+		},
+	];
 }

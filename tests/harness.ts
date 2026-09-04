@@ -123,22 +123,23 @@ export async function api(
 	});
 }
 
-export async function register(
-	hub: Hub,
-	session_id: string,
-	name: string,
-	token: string = TOKEN,
-): Promise<string> {
-	const r = await api(hub, "POST", "/v1/agents/register", {
-		project: "default",
-		session_id,
-		name,
-		purpose: "",
-		model: "test",
-		color: "#888888",
-		cwd: "/tmp",
-		explicit: false,
-	}, token);
+export async function register(hub: Hub, session_id: string, name: string, token: string = TOKEN): Promise<string> {
+	const r = await api(
+		hub,
+		"POST",
+		"/v1/agents/register",
+		{
+			project: "default",
+			session_id,
+			name,
+			purpose: "",
+			model: "test",
+			color: "#888888",
+			cwd: "/tmp",
+			explicit: false,
+		},
+		token,
+	);
 	expect(r.status).toBe(200);
 	return ((await r.json()) as RegisterResponse).sse_url;
 }
@@ -163,7 +164,9 @@ export async function readSseEvents<E extends keyof SseEvents>(
 	count: number,
 	timeoutMs = 5_000,
 ): Promise<SseEvents[E][]> {
-	const reader = resp.body!.getReader();
+	const body = resp.body;
+	if (!body) throw new Error("SSE response has no body");
+	const reader = body.getReader();
 	const dec = new TextDecoder();
 	let buf = "";
 	const out: SseEvents[E][] = [];
@@ -177,8 +180,7 @@ export async function readSseEvents<E extends keyof SseEvents>(
 		]);
 		if (done && !value) break;
 		if (value) buf += dec.decode(value, { stream: true });
-		let idx: number;
-		while ((idx = buf.indexOf("\n\n")) >= 0) {
+		for (let idx = buf.indexOf("\n\n"); idx >= 0; idx = buf.indexOf("\n\n")) {
 			const frame = buf.slice(0, idx);
 			buf = buf.slice(idx + 2);
 			let event = "message";

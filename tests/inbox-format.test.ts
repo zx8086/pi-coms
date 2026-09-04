@@ -28,7 +28,7 @@ describe("formatInbox", () => {
 	});
 
 	test("listing truncates a long body at the preview cap with an ellipsis", () => {
-		const body = "a".repeat(INBOX_PREVIEW_CHARS) + "CERT_DETAIL_BEYOND_CAP";
+		const body = `${"a".repeat(INBOX_PREVIEW_CHARS)}CERT_DETAIL_BEYOND_CAP`;
 		const text = formatInbox("ops", [msg({ prompt: body })]);
 		expect(text).not.toContain("CERT_DETAIL_BEYOND_CAP");
 		expect(text).toContain("…");
@@ -49,7 +49,7 @@ describe("formatInbox", () => {
 	});
 
 	test("msg_id returns that message with the full untruncated body", () => {
-		const body = "c".repeat(INBOX_PREVIEW_CHARS * 2) + "TAIL_MARKER";
+		const body = `${"c".repeat(INBOX_PREVIEW_CHARS * 2)}TAIL_MARKER`;
 		const target = msg({ prompt: body });
 		const text = formatInbox("ops", [msg(), target, msg()], { msgId: target.msg_id });
 		expect(text).toContain("TAIL_MARKER");
@@ -68,8 +68,23 @@ describe("formatInbox", () => {
 
 test("a completed conversation shows its reply under the prompt; a failed one shows the error", () => {
 	const out = formatInbox("eu-oit-dev", [
-		{ msg_id: "m1", sender_name: "simon", status: "complete", created_at: "t1", prompt: "how many RDS?", response: "three" },
-		{ msg_id: "m2", sender_name: "simon", status: "error", created_at: "t2", prompt: "and now?", response: null, error: "expired" },
+		{
+			msg_id: "m1",
+			sender_name: "simon",
+			status: "complete",
+			created_at: "t1",
+			prompt: "how many RDS?",
+			response: "three",
+		},
+		{
+			msg_id: "m2",
+			sender_name: "simon",
+			status: "error",
+			created_at: "t2",
+			prompt: "and now?",
+			response: null,
+			error: "expired",
+		},
 	]);
 	expect(out).toContain("how many RDS?\n  reply: three");
 	expect(out).toContain("and now?\n  reply: (expired)");

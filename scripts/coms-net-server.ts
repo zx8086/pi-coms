@@ -80,14 +80,14 @@ const LOG_TTY = process.stdout.isTTY === true;
 const LOG_QUIET = process.env.PI_COMS_NET_LOG_QUIET === "1";
 const LOG_HEARTBEAT = process.env.PI_COMS_NET_LOG_HEARTBEAT === "1";
 
-const C_DIM    = LOG_TTY ? "\x1b[2m"  : "";
-const C_RESET  = LOG_TTY ? "\x1b[0m"  : "";
-const C_GREEN  = LOG_TTY ? "\x1b[32m" : "";
-const C_CYAN   = LOG_TTY ? "\x1b[36m" : "";
+const C_DIM = LOG_TTY ? "\x1b[2m" : "";
+const C_RESET = LOG_TTY ? "\x1b[0m" : "";
+const C_GREEN = LOG_TTY ? "\x1b[32m" : "";
+const C_CYAN = LOG_TTY ? "\x1b[36m" : "";
 const C_YELLOW = LOG_TTY ? "\x1b[33m" : "";
-const C_RED    = LOG_TTY ? "\x1b[31m" : "";
-const C_PINK   = LOG_TTY ? "\x1b[95m" : "";
-const C_BLUE   = LOG_TTY ? "\x1b[34m" : "";
+const C_RED = LOG_TTY ? "\x1b[31m" : "";
+const C_PINK = LOG_TTY ? "\x1b[95m" : "";
+const C_BLUE = LOG_TTY ? "\x1b[34m" : "";
 
 function logLine(symbol: string, color: string, kind: string, detail: string): void {
 	if (LOG_QUIET) return;
@@ -96,30 +96,49 @@ function logLine(symbol: string, color: string, kind: string, detail: string): v
 	console.log(`${C_DIM}${t}${C_RESET}  ${color}${symbol}${C_RESET} ${color}${padded}${C_RESET} ${detail}`);
 }
 
-const tail6 = (id: string) => id.length > 6 ? id.slice(-6) : id;
+const tail6 = (id: string) => (id.length > 6 ? id.slice(-6) : id);
 const dim = (s: string) => `${C_DIM}${s}${C_RESET}`;
 
 function logRegister(name: string, project: string, sid: string, isReregister: boolean, principal?: string): void {
 	const verb = isReregister ? "re-register" : "register";
-	const who = principal ? ` ${dim("principal=" + principal)}` : "";
-	logLine(isReregister ? "↻" : "✓", C_GREEN, verb, `${name}@${project} ${dim("sid=…" + tail6(sid))}${who}`);
+	const who = principal ? ` ${dim(`principal=${principal}`)}` : "";
+	logLine(isReregister ? "↻" : "✓", C_GREEN, verb, `${name}@${project} ${dim(`sid=…${tail6(sid)}`)}${who}`);
 }
 function logUnregister(name: string, reason: string): void {
-	logLine("✗", C_RED, "unregister", `${name} ${dim("reason=" + reason)}`);
+	logLine("✗", C_RED, "unregister", `${name} ${dim(`reason=${reason}`)}`);
 }
 function logSseOpen(name: string, totalStreams: number): void {
 	logLine("⇄", C_CYAN, "sse-open", `${name} ${dim(`(${totalStreams} stream${totalStreams === 1 ? "" : "s"})`)}`);
 }
 function logSseClose(name: string, reason: string): void {
-	logLine("⇄", C_DIM, "sse-close", `${name} ${dim("reason=" + reason)}`);
+	logLine("⇄", C_DIM, "sse-close", `${name} ${dim(`reason=${reason}`)}`);
 }
-function logMessageSend(sender: string, target: string, msgId: string, prompt: string, hops: number, delivered: boolean): void {
-	const preview = prompt.length > 50 ? prompt.slice(0, 47) + "…" : prompt;
+function logMessageSend(
+	sender: string,
+	target: string,
+	msgId: string,
+	prompt: string,
+	hops: number,
+	delivered: boolean,
+): void {
+	const preview = prompt.length > 50 ? `${prompt.slice(0, 47)}…` : prompt;
 	const safePreview = preview.replace(/\n/g, " ⏎ ");
 	const status = delivered ? dim("delivered") : dim("queued");
-	logLine("→", C_PINK, "message", `${sender} → ${target} ${dim(tail6(msgId))} "${safePreview}" ${dim(`hops=${hops}`)} ${status}`);
+	logLine(
+		"→",
+		C_PINK,
+		"message",
+		`${sender} → ${target} ${dim(tail6(msgId))} "${safePreview}" ${dim(`hops=${hops}`)} ${status}`,
+	);
 }
-function logResponse(responder: string, sender: string, msgId: string, isError: boolean, error: string | null, size: number): void {
+function logResponse(
+	responder: string,
+	sender: string,
+	msgId: string,
+	isError: boolean,
+	error: string | null,
+	size: number,
+): void {
 	const status = isError ? `${C_RED}error=${error}${C_RESET}` : dim(`${size}c`);
 	logLine("←", isError ? C_RED : C_GREEN, "response", `${responder} → ${sender} ${dim(tail6(msgId))} ${status}`);
 }
@@ -133,7 +152,7 @@ function logExpired(msgId: string): void {
 	logLine("⏱", C_YELLOW, "expired", dim(tail6(msgId)));
 }
 function logTargetDied(msgId: string, target: string, reason: string): void {
-	logLine("✗", C_RED, "target-died", `${dim(tail6(msgId))} target=${target} ${dim("reason=" + reason)}`);
+	logLine("✗", C_RED, "target-died", `${dim(tail6(msgId))} target=${target} ${dim(`reason=${reason}`)}`);
 }
 function logHeartbeat(name: string, pct: number, depth: number): void {
 	if (!LOG_HEARTBEAT) return;
@@ -148,12 +167,7 @@ function logRejected(reason: string, detail: string): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type AgentStatus = "online" | "stale" | "offline";
-export type MessageStatus =
-	| "queued"
-	| "delivered"
-	| "complete"
-	| "error"
-	| "timeout";
+export type MessageStatus = "queued" | "delivered" | "complete" | "error" | "timeout";
 
 export type AgentCard = {
 	session_id: string;
@@ -360,9 +374,7 @@ function parseDirectoryEntries(principals: Record<string, unknown> | undefined):
 		if (!raw || typeof raw !== "object") continue;
 		const rec = raw as { token?: unknown; kind?: unknown; names?: unknown };
 		if (typeof rec.token !== "string" || rec.token.length < 16) continue;
-		const names = Array.isArray(rec.names)
-			? rec.names.filter((n: unknown): n is string => typeof n === "string")
-			: [];
+		const names = Array.isArray(rec.names) ? rec.names.filter((n: unknown): n is string => typeof n === "string") : [];
 		map.set(sha256hex(rec.token), {
 			principal,
 			kind: typeof rec.kind === "string" ? rec.kind : "operator",
@@ -382,8 +394,17 @@ async function refreshTokenDirectory(): Promise<void> {
 		} else if (AUTH_SSM_PATH) {
 			// The hub stays Bun-stdlib-only; SSM access rides the host's aws CLI.
 			const proc = Bun.spawn(
-				["aws", "ssm", "get-parameters-by-path", "--path", AUTH_SSM_PATH,
-					"--with-decryption", "--recursive", "--output", "json"],
+				[
+					"aws",
+					"ssm",
+					"get-parameters-by-path",
+					"--path",
+					AUTH_SSM_PATH,
+					"--with-decryption",
+					"--recursive",
+					"--output",
+					"json",
+				],
 				{ stdout: "pipe", stderr: "pipe" },
 			);
 			const out = await new Response(proc.stdout).text();
@@ -392,7 +413,10 @@ async function refreshTokenDirectory(): Promise<void> {
 			const parsed = JSON.parse(out);
 			const principals: Record<string, unknown> = {};
 			for (const p of parsed.Parameters ?? []) {
-				const name = String(p.Name ?? "").split("/").pop() ?? "";
+				const name =
+					String(p.Name ?? "")
+						.split("/")
+						.pop() ?? "";
 				if (!name) continue;
 				try {
 					principals[name] = JSON.parse(p.Value);
@@ -420,16 +444,28 @@ async function refreshTokenDirectory(): Promise<void> {
 			if (prev.has(th) && !tokenDirectory.has(th)) {
 				const w = p.streams.get(sid);
 				if (w) {
-					try { w.close(); } catch { /* noop */ }
+					try {
+						w.close();
+					} catch {
+						/* noop */
+					}
 					p.streams.delete(sid);
 				}
 				p.agents.delete(sid);
 				nameIndexRemove(p, entry.name, sid);
 				failDeliveredMail(p, projectName, sid, entry.name, "revoked");
 				logUnregister(entry.name, "revoked");
-				broadcast(p, "agent_left", {
-					project: projectName, session_id: sid, name: entry.name, reason: "revoked",
-				}, sid);
+				broadcast(
+					p,
+					"agent_left",
+					{
+						project: projectName,
+						session_id: sid,
+						name: entry.name,
+						reason: "revoked",
+					},
+					sid,
+				);
 			}
 		}
 	}
@@ -516,16 +552,11 @@ export function sseFrame(event: string, data: unknown, id?: number): string {
 	const lines = [`event: ${event}`];
 	if (id !== undefined) lines.push(`id: ${id}`);
 	lines.push(`data: ${JSON.stringify(data)}`);
-	return lines.join("\n") + "\n\n";
+	return `${lines.join("\n")}\n\n`;
 }
 
-export function resolveUniqueName(
-	project: ProjectState,
-	desiredName: string,
-): string {
-	const liveNames = new Set(
-		[...project.agents.values()].map((a) => a.name),
-	);
+export function resolveUniqueName(project: ProjectState, desiredName: string): string {
+	const liveNames = new Set([...project.agents.values()].map((a) => a.name));
 	if (!liveNames.has(desiredName)) return desiredName;
 	let n = 2;
 	while (liveNames.has(`${desiredName}${n}`)) n++;
@@ -606,29 +637,44 @@ export class MailStore {
 		}
 	}
 	upsert(m: ComsMessage): void {
-		this.db.query(`INSERT INTO messages (msg_id, project, sender_session, sender_name, sender_cwd,
+		this.db
+			.query(`INSERT INTO messages (msg_id, project, sender_session, sender_name, sender_cwd,
 			target_session, target_name, prompt, conversation_id, response_schema, hops, status, mailbox,
 			response, error, created_at, delivered_at, completed_at, expires_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(msg_id) DO UPDATE SET target_session=excluded.target_session,
 			target_name=excluded.target_name, status=excluded.status, response=excluded.response,
 			error=excluded.error, delivered_at=excluded.delivered_at,
-			completed_at=excluded.completed_at, expires_at=excluded.expires_at`).run(
-			m.msg_id, m.project, m.sender_session, m.sender_name, m.sender_cwd,
-			m.target_session, m.target_name, m.prompt, m.conversation_id,
-			m.response_schema ? JSON.stringify(m.response_schema) : null, m.hops, m.status,
-			m.mailbox ? 1 : 0,
-			m.response == null ? null : JSON.stringify(m.response), m.error ?? null,
-			m.created_at, m.delivered_at ?? null, m.completed_at ?? null, m.expires_at,
-		);
+			completed_at=excluded.completed_at, expires_at=excluded.expires_at`)
+			.run(
+				m.msg_id,
+				m.project,
+				m.sender_session,
+				m.sender_name,
+				m.sender_cwd,
+				m.target_session,
+				m.target_name,
+				m.prompt,
+				m.conversation_id,
+				m.response_schema ? JSON.stringify(m.response_schema) : null,
+				m.hops,
+				m.status,
+				m.mailbox ? 1 : 0,
+				m.response == null ? null : JSON.stringify(m.response),
+				m.error ?? null,
+				m.created_at,
+				m.delivered_at ?? null,
+				m.completed_at ?? null,
+				m.expires_at,
+			);
 	}
 	remove(msg_id: string): void {
 		this.db.query("DELETE FROM messages WHERE msg_id = ?").run(msg_id);
 	}
 	loadNonTerminal(): ComsMessage[] {
-		const rows = this.db.query(
-			"SELECT * FROM messages WHERE status IN ('queued','delivered') ORDER BY created_at ASC",
-		).all() as MessageRow[];
+		const rows = this.db
+			.query("SELECT * FROM messages WHERE status IN ('queued','delivered') ORDER BY created_at ASC")
+			.all() as MessageRow[];
 		return rows.map((r) => ({
 			msg_id: r.msg_id,
 			project: r.project,
@@ -675,13 +721,15 @@ export class MailStore {
 			"msg_id, sender_name, target_name, prompt, status, error, response, created_at, delivered_at, completed_at";
 		const scope = "(mailbox = 1 OR status IN ('complete','error','timeout')) AND target_name = ?";
 		const rows = since
-			? this.db.query(
-				`SELECT ${cols} FROM messages WHERE ${scope} AND msg_id > ? ORDER BY msg_id ASC LIMIT ?`,
-			).all(targetName, since, limit)
-			: this.db.query(
-				`SELECT * FROM (SELECT ${cols} FROM messages WHERE ${scope}
+			? this.db
+					.query(`SELECT ${cols} FROM messages WHERE ${scope} AND msg_id > ? ORDER BY msg_id ASC LIMIT ?`)
+					.all(targetName, since, limit)
+			: this.db
+					.query(
+						`SELECT * FROM (SELECT ${cols} FROM messages WHERE ${scope}
 				ORDER BY msg_id DESC LIMIT ?) ORDER BY msg_id ASC`,
-			).all(targetName, limit);
+					)
+					.all(targetName, limit);
 		return (rows as InboxRow[]).map((r) => ({
 			...r,
 			response: r.response == null ? null : JSON.parse(r.response),
@@ -693,12 +741,12 @@ export class MailStore {
 	// the live sweep, which marks them expired in memory first.
 	purgeExpired(retainMs = 1_209_600_000): void {
 		const now = Date.now();
-		this.db.query(
-			"DELETE FROM messages WHERE mailbox = 1 AND status IN ('complete','error','timeout') AND expires_at < ?",
-		).run(new Date(now).toISOString());
-		this.db.query(
-			"DELETE FROM messages WHERE mailbox = 0 AND status IN ('complete','error','timeout') AND completed_at < ?",
-		).run(new Date(now - retainMs).toISOString());
+		this.db
+			.query("DELETE FROM messages WHERE mailbox = 1 AND status IN ('complete','error','timeout') AND expires_at < ?")
+			.run(new Date(now).toISOString());
+		this.db
+			.query("DELETE FROM messages WHERE mailbox = 0 AND status IN ('complete','error','timeout') AND completed_at < ?")
+			.run(new Date(now - retainMs).toISOString());
 	}
 
 	close(): void {
@@ -755,11 +803,7 @@ function nameIndexAdd(p: ProjectState, name: string, sessionId: string): void {
 	bag.add(sessionId);
 }
 
-function nameIndexRemove(
-	p: ProjectState,
-	name: string,
-	sessionId: string,
-): void {
+function nameIndexRemove(p: ProjectState, name: string, sessionId: string): void {
 	const bag = p.nameIndex.get(name);
 	if (!bag) return;
 	bag.delete(sessionId);
@@ -799,12 +843,7 @@ function entryToCard(e: RegistryEntry): AgentCard {
 	};
 }
 
-function broadcast(
-	p: ProjectState,
-	event: string,
-	data: unknown,
-	excludeSession?: string,
-): void {
+function broadcast(p: ProjectState, event: string, data: unknown, excludeSession?: string): void {
 	for (const [sid, w] of p.streams) {
 		if (excludeSession && sid === excludeSession) continue;
 		const id = ++w.lastId;
@@ -816,12 +855,7 @@ function broadcast(
 	}
 }
 
-function sendToStream(
-	p: ProjectState,
-	sessionId: string,
-	event: string,
-	data: unknown,
-): void {
+function sendToStream(p: ProjectState, sessionId: string, event: string, data: unknown): void {
 	const w = p.streams.get(sessionId);
 	if (!w) return;
 	const id = ++w.lastId;
@@ -1052,12 +1086,7 @@ async function handleRegister(req: Request, auth: AuthResult | null): Promise<Re
 
 	// Emit agent_joined to OTHER streams (do not echo to a stream that may not
 	// exist yet — the registering client opens SSE next).
-	broadcast(
-		p,
-		"agent_joined",
-		{ project: projectName, agent: entryToCard(entry) },
-		body.session_id,
-	);
+	broadcast(p, "agent_joined", { project: projectName, agent: entryToCard(entry) }, body.session_id);
 
 	const sse_url = `/v1/events?project=${encodeURIComponent(projectName)}&session_id=${encodeURIComponent(body.session_id)}`;
 	const resp: RegisterResponse = {
@@ -1122,13 +1151,7 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 			const helloId = ++writer.lastId;
 			try {
 				controller.enqueue(
-					enc.encode(
-						sseFrame(
-							"hello",
-							{ server_time: nowIso(), server_id: state.server_id },
-							helloId,
-						),
-					),
+					enc.encode(sseFrame("hello", { server_time: nowIso(), server_id: state.server_id }, helloId)),
 				);
 			} catch {
 				closed = true;
@@ -1143,15 +1166,7 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 			}
 			const snapId = ++writer.lastId;
 			try {
-				controller.enqueue(
-					enc.encode(
-						sseFrame(
-							"pool_snapshot",
-							{ project: projectName, agents },
-							snapId,
-						),
-					),
-				);
+				controller.enqueue(enc.encode(sseFrame("pool_snapshot", { project: projectName, agents }, snapId)));
 			} catch {
 				closed = true;
 			}
@@ -1209,11 +1224,7 @@ function handleEvents(req: Request, url: URL, auth: AuthResult): Response {
 	});
 }
 
-async function handleHeartbeat(
-	req: Request,
-	sessionId: string,
-	auth: AuthResult,
-): Promise<Response> {
+async function handleHeartbeat(req: Request, sessionId: string, auth: AuthResult): Promise<Response> {
 	let body: HeartbeatRequest;
 	try {
 		body = (await req.json()) as HeartbeatRequest;
@@ -1234,16 +1245,10 @@ async function handleHeartbeat(
 		model: entry.model,
 		status: entry.status,
 	};
-	if (typeof body.context_used_pct === "number")
-		entry.context_used_pct = body.context_used_pct;
-	if (typeof body.queue_depth === "number")
-		entry.queue_depth = body.queue_depth;
+	if (typeof body.context_used_pct === "number") entry.context_used_pct = body.context_used_pct;
+	if (typeof body.queue_depth === "number") entry.queue_depth = body.queue_depth;
 	if (typeof body.model === "string") entry.model = body.model;
-	if (
-		body.status === "online" ||
-		body.status === "stale" ||
-		body.status === "offline"
-	) {
+	if (body.status === "online" || body.status === "stale" || body.status === "offline") {
 		entry.status = body.status;
 	} else {
 		entry.status = "online";
@@ -1280,9 +1285,7 @@ async function handleHeartbeat(
 
 function handleListAgents(_req: Request, url: URL): Response {
 	const projectName = url.searchParams.get("project") ?? "default";
-	const includeExplicit =
-		(url.searchParams.get("include_explicit") ?? "false").toLowerCase() ===
-		"true";
+	const includeExplicit = (url.searchParams.get("include_explicit") ?? "false").toLowerCase() === "true";
 	const p = state.projects.get(projectName);
 	const out: AgentCard[] = [];
 	if (p) {
@@ -1301,12 +1304,7 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 	} catch {
 		return errorJson("invalid_json", 400);
 	}
-	if (
-		!body ||
-		typeof body !== "object" ||
-		typeof body.sender_session !== "string" ||
-		typeof body.prompt !== "string"
-	) {
+	if (!body || typeof body !== "object" || typeof body.sender_session !== "string" || typeof body.prompt !== "string") {
 		return errorJson("invalid_request", 400);
 	}
 	const projectName = body.project ?? "default";
@@ -1326,9 +1324,7 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 
 	// Mailbox TTL: beyond the default the send survives an offline recipient.
 	const requestedTtl =
-		typeof body.ttl_ms === "number" && body.ttl_ms > 0
-			? Math.min(body.ttl_ms, MAX_TTL_MS)
-			: MESSAGE_TTL_MS;
+		typeof body.ttl_ms === "number" && body.ttl_ms > 0 ? Math.min(body.ttl_ms, MAX_TTL_MS) : MESSAGE_TTL_MS;
 	const isMailbox = requestedTtl > MESSAGE_TTL_MS;
 
 	// Resolve target.
@@ -1362,13 +1358,9 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 						target_name: desired,
 						prompt: body.prompt,
 						conversation_id:
-							body.conversation_id && typeof body.conversation_id === "string"
-								? body.conversation_id
-								: null,
+							body.conversation_id && typeof body.conversation_id === "string" ? body.conversation_id : null,
 						response_schema:
-							body.response_schema && typeof body.response_schema === "object"
-								? body.response_schema
-								: null,
+							body.response_schema && typeof body.response_schema === "object" ? body.response_schema : null,
 						hops,
 						status: "queued",
 						mailbox: isMailbox,
@@ -1426,14 +1418,8 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 		target_session: target.session_id,
 		target_name: target.name,
 		prompt: body.prompt,
-		conversation_id:
-			body.conversation_id && typeof body.conversation_id === "string"
-				? body.conversation_id
-				: null,
-		response_schema:
-			body.response_schema && typeof body.response_schema === "object"
-				? body.response_schema
-				: null,
+		conversation_id: body.conversation_id && typeof body.conversation_id === "string" ? body.conversation_id : null,
+		response_schema: body.response_schema && typeof body.response_schema === "object" ? body.response_schema : null,
 		hops,
 		status: "queued",
 		mailbox: isMailbox,
@@ -1478,14 +1464,7 @@ async function handleSendMessage(req: Request, auth: AuthResult): Promise<Respon
 		});
 	}
 
-	logMessageSend(
-		sender.name,
-		target.name,
-		msg.msg_id,
-		msg.prompt,
-		hops,
-		msg.status === "delivered",
-	);
+	logMessageSend(sender.name, target.name, msg.msg_id, msg.prompt, hops, msg.status === "delivered");
 
 	const resp: SendResponse = {
 		ok: true,
@@ -1547,17 +1526,13 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 		}
 	}
 	if (!project || !msg) {
-		return new Response(
-			JSON.stringify({ ok: false, error: "message_not_found" }),
-			{ status: 404, headers: { "content-type": "application/json" } },
-		);
+		return new Response(JSON.stringify({ ok: false, error: "message_not_found" }), {
+			status: 404,
+			headers: { "content-type": "application/json" },
+		});
 	}
 	// Already terminal? Resolve immediately.
-	if (
-		msg.status === "complete" ||
-		msg.status === "error" ||
-		msg.status === "timeout"
-	) {
+	if (msg.status === "complete" || msg.status === "error" || msg.status === "timeout") {
 		return json({
 			msg_id: msg.msg_id,
 			status: msg.status,
@@ -1567,10 +1542,7 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 	}
 
 	const requested = Number(url.searchParams.get("timeout_ms") ?? "");
-	let timeout_ms =
-		Number.isFinite(requested) && requested > 0
-			? requested
-			: DEFAULT_AWAIT_TIMEOUT_MS;
+	let timeout_ms = Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_AWAIT_TIMEOUT_MS;
 	// Clamp to TTL.
 	if (timeout_ms > MESSAGE_TTL_MS) timeout_ms = MESSAGE_TTL_MS;
 
@@ -1664,22 +1636,14 @@ function handleAwaitMessage(req: Request, url: URL, msg_id: string): Response {
 	);
 }
 
-async function handleSubmitResponse(
-	req: Request,
-	msg_id: string,
-	auth: AuthResult,
-): Promise<Response> {
+async function handleSubmitResponse(req: Request, msg_id: string, auth: AuthResult): Promise<Response> {
 	let body: ResponseSubmitRequest;
 	try {
 		body = (await req.json()) as ResponseSubmitRequest;
 	} catch {
 		return errorJson("invalid_json", 400);
 	}
-	if (
-		!body ||
-		typeof body !== "object" ||
-		typeof body.responder_session !== "string"
-	) {
+	if (!body || typeof body !== "object" || typeof body.responder_session !== "string") {
 		return errorJson("invalid_request", 400);
 	}
 	let project: ProjectState | undefined;
@@ -1701,11 +1665,7 @@ async function handleSubmitResponse(
 	if (DIRECTORY_MODE && (!responder || !ownsSession(auth, responder))) {
 		return errorJson("not_owner", 403);
 	}
-	if (
-		msg.status === "complete" ||
-		msg.status === "error" ||
-		msg.status === "timeout"
-	) {
+	if (msg.status === "complete" || msg.status === "error" || msg.status === "timeout") {
 		return errorJson("already_terminal", 409, { status: msg.status });
 	}
 
@@ -1737,11 +1697,7 @@ async function handleSubmitResponse(
 
 	const senderName = project.agents.get(msg.sender_session)?.name ?? "(gone)";
 	const responseSize =
-		typeof msg.response === "string"
-			? msg.response.length
-			: msg.response
-				? JSON.stringify(msg.response).length
-				: 0;
+		typeof msg.response === "string" ? msg.response.length : msg.response ? JSON.stringify(msg.response).length : 0;
 	logResponse(responderName, senderName, msg.msg_id, isError, msg.error, responseSize);
 
 	return json({ ok: true });
@@ -1843,9 +1799,7 @@ async function router(req: Request): Promise<Response> {
 	}
 
 	// /v1/agents/:session_id/heartbeat (POST) and DELETE /v1/agents/:session_id
-	const agentMatch = pathname.match(
-		/^\/v1\/agents\/([^/]+)(?:\/(heartbeat))?$/,
-	);
+	const agentMatch = pathname.match(/^\/v1\/agents\/([^/]+)(?:\/(heartbeat))?$/);
 	if (agentMatch) {
 		const sessionId = decodeURIComponent(agentMatch[1]);
 		const tail = agentMatch[2];
@@ -1859,9 +1813,7 @@ async function router(req: Request): Promise<Response> {
 	}
 
 	// /v1/messages/:id, /v1/messages/:id/await, /v1/messages/:id/response
-	const msgMatch = pathname.match(
-		/^\/v1\/messages\/([^/]+)(?:\/(await|response))?$/,
-	);
+	const msgMatch = pathname.match(/^\/v1\/messages\/([^/]+)(?:\/(await|response))?$/);
 	if (msgMatch) {
 		const msg_id = decodeURIComponent(msgMatch[1]);
 		const tail = msgMatch[2];
@@ -1947,10 +1899,7 @@ function ttlScanTick(): void {
 		for (const [id, m] of [...p.messages]) {
 			const expires = Date.parse(m.expires_at);
 			const completedAt = m.completed_at ? Date.parse(m.completed_at) : 0;
-			if (
-				m.status === "queued" ||
-				m.status === "delivered"
-			) {
+			if (m.status === "queued" || m.status === "delivered") {
 				if (Number.isFinite(expires) && now > expires) {
 					m.status = "error";
 					m.error = "expired";
@@ -2036,9 +1985,7 @@ export async function main(): Promise<void> {
 	// perimeter, and PI_COMS_NET_AUTH_TOKEN (if set) is just the root principal.
 	if (!TOKEN && !DIRECTORY_MODE) {
 		if (!isLoopback(HOST)) {
-			console.error(
-				`coms-net: refusing to bind ${HOST} without an explicit PI_COMS_NET_AUTH_TOKEN.`,
-			);
+			console.error(`coms-net: refusing to bind ${HOST} without an explicit PI_COMS_NET_AUTH_TOKEN.`);
 			process.exit(1);
 		}
 		TOKEN = crypto.randomBytes(32).toString("hex");
@@ -2098,11 +2045,7 @@ export async function main(): Promise<void> {
 	let secretPath: string | null = null;
 	if (TOKEN_FILE_OWNED_BY_US) {
 		secretPath = path.join(dir, "server.secret.json");
-		atomicWriteSync(
-			secretPath,
-			JSON.stringify({ token: TOKEN }, null, 2),
-			0o600,
-		);
+		atomicWriteSync(secretPath, JSON.stringify({ token: TOKEN }, null, 2), 0o600);
 		try {
 			fs.chmodSync(secretPath, 0o600);
 		} catch {
@@ -2123,7 +2066,9 @@ export async function main(): Promise<void> {
 		console.log(`${bootDim}          using token from PI_COMS_NET_AUTH_TOKEN${bootReset}`);
 	}
 	if (!LOG_QUIET) {
-		console.log(`${bootDim}          ─── events below (Ctrl-C to quit, set PI_COMS_NET_LOG_HEARTBEAT=1 for heartbeat noise) ───${bootReset}`);
+		console.log(
+			`${bootDim}          ─── events below (Ctrl-C to quit, set PI_COMS_NET_LOG_HEARTBEAT=1 for heartbeat noise) ───${bootReset}`,
+		);
 	}
 
 	// Start cleanup loops.

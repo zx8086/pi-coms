@@ -25,10 +25,7 @@ export interface TurnReply {
 // One turn can cover several stacked inbound prompts (followUps merge into the
 // running turn), so every unfulfilled inbound gets the turn's final assistant
 // text as its reply -- oldest first, each under its own response_schema rule.
-export function buildTurnReplies(
-	inbounds: TurnReplyInbound[],
-	lastAssistantText: string,
-): TurnReply[] {
+export function buildTurnReplies(inbounds: TurnReplyInbound[], lastAssistantText: string): TurnReply[] {
 	const replies: TurnReply[] = [];
 	for (const inbound of inbounds) {
 		if (inbound.fulfilled) continue;
@@ -63,8 +60,13 @@ export function lastAssistantText(messages: Iterable<TurnMessage>): string {
 			text = content;
 		} else if (Array.isArray(content)) {
 			text = content
-				.filter((b): b is { type: "text"; text: string } =>
-					!!b && typeof b === "object" && (b as { type?: unknown }).type === "text" && typeof (b as { text?: unknown }).text === "string")
+				.filter(
+					(b): b is { type: "text"; text: string } =>
+						!!b &&
+						typeof b === "object" &&
+						(b as { type?: unknown }).type === "text" &&
+						typeof (b as { text?: unknown }).text === "string",
+				)
 				.map((b) => b.text)
 				.join("\n");
 		}

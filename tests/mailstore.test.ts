@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { MailStore, type ComsMessage } from "../scripts/coms-net-server.ts";
+import { type ComsMessage, MailStore } from "../scripts/coms-net-server.ts";
 
 const tmpDirs: string[] = [];
 afterAll(() => {

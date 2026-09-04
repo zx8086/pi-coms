@@ -37,9 +37,7 @@ export function logSignature(message: string): string {
 		// keys): a fresh signature per SKU defeats dedup exactly the way raw
 		// UUIDs did. A token of 8+ word chars with 2+ digits is an id, not a
 		// word; class names with a single version digit (ImagesClientV2) stay.
-		.replace(/\b[A-Za-z0-9_]{8,}\b/g, (t) =>
-			(t.match(/\d/g)?.length ?? 0) >= 2 ? "<id>" : t,
-		)
+		.replace(/\b[A-Za-z0-9_]{8,}\b/g, (t) => ((t.match(/\d/g)?.length ?? 0) >= 2 ? "<id>" : t))
 		.replace(/\d+/g, "<n>")
 		.slice(0, 120);
 	return crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 12);
@@ -56,11 +54,7 @@ export type CheckLogsOpts = {
 	maxFindingsPerCycle?: number;
 };
 
-export async function checkLogs(
-	client: AwsClient,
-	state: MonitorState,
-	opts: CheckLogsOpts = {},
-): Promise<Finding[]> {
+export async function checkLogs(client: AwsClient, state: MonitorState, opts: CheckLogsOpts = {}): Promise<Finding[]> {
 	const now = opts.now ?? Date.now();
 	const reAlertMs = opts.reAlertMs ?? 86_400_000;
 	const lookbackMs = opts.lookbackMs ?? 900_000;

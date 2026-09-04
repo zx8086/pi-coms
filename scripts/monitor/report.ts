@@ -79,9 +79,7 @@ export function formatIncidentReport(
 	investigationFailure?: string | null,
 	suppressedCount = 0,
 ): string {
-	const sorted = [...items].sort(
-		(a, b) => SEV_ORDER[a.finding.severity] - SEV_ORDER[b.finding.severity],
-	);
+	const sorted = [...items].sort((a, b) => SEV_ORDER[a.finding.severity] - SEV_ORDER[b.finding.severity]);
 	const top = sorted[0]?.finding.severity ?? "info";
 	const lines: string[] = [`[${top}] aws-${accountId}: ${sorted.length} finding(s)`, ""];
 	for (const { finding, diagnosis } of sorted) {
@@ -218,7 +216,9 @@ export function formatDigest(d: DigestInput): string {
 	if (total === 0) {
 		lines.push("- findings: no findings in the last 24h");
 	} else {
-		const parts = Object.entries(d.findingCounts).map(([k, v]) => `${k}=${v}`).join(" ");
+		const parts = Object.entries(d.findingCounts)
+			.map(([k, v]) => `${k}=${v}`)
+			.join(" ");
 		lines.push(`- findings: ${total} (${parts})`);
 	}
 	// Counts alone hide what actually needs follow-up: name every warn+
@@ -228,9 +228,9 @@ export function formatDigest(d: DigestInput): string {
 	// an uninvestigated warn has nobody looking at it (SIO-1623).
 	const notables = (d.notables ?? [])
 		.filter((n) => n.severity !== "info")
-		.sort((a, b) =>
-			Number(b.uninvestigated) - Number(a.uninvestigated) ||
-			SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
+		.sort(
+			(a, b) => Number(b.uninvestigated) - Number(a.uninvestigated) || SEV_ORDER[a.severity] - SEV_ORDER[b.severity],
+		);
 	if (notables.length > 0) {
 		lines.push("- notable warn+ findings (last 24h):");
 		for (const n of notables.slice(0, NOTABLE_CAP)) {
@@ -252,9 +252,7 @@ export function formatDigest(d: DigestInput): string {
 			: `- check errors: ${d.checkErrors}`,
 	);
 	lines.push(
-		d.activeAlarms.length === 0
-			? "- alarms: none in ALARM"
-			: `- alarms in ALARM: ${d.activeAlarms.join(", ")}`,
+		d.activeAlarms.length === 0 ? "- alarms: none in ALARM" : `- alarms in ALARM: ${d.activeAlarms.join(", ")}`,
 	);
 	if (d.yesterdayUsd != null) {
 		const base = d.baselineUsd != null ? ` vs 14d baseline $${d.baselineUsd.toFixed(2)}` : "";
