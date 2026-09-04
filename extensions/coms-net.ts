@@ -1033,7 +1033,7 @@ export default function (pi: ExtensionAPI) {
 		serverUrl = resolveServerUrl(project, flags.serverUrl);
 		if (!serverUrl) {
 			notify(
-				`coms-net: no server URL for project "${project}". Start one with: bun scripts/coms-net-server.ts`,
+				`coms-net: no server URL for project "${project}". Start a hub with: bun scripts/coms-net-server.ts (from the pi-coms package) or set PI_COMS_NET_SERVER_URL`,
 				"error",
 			);
 			audit("boot_failed", { reason: "no_server_url", project });
@@ -1058,7 +1058,7 @@ export default function (pi: ExtensionAPI) {
 		} catch (err) {
 			notify(
 				`coms-net: server unreachable at ${serverUrl} — ${safeError(err)}. ` +
-				`Start one with: bun scripts/coms-net-server.ts`,
+				`Start a hub with: bun scripts/coms-net-server.ts (from the pi-coms package) or check PI_COMS_NET_SERVER_URL`,
 				"error",
 			);
 			audit("boot_failed", { reason: "health_failed", error: safeError(err) });

@@ -56,6 +56,32 @@ The agent name flag is `--cname` (Pi owns `--name` and resumes it across session
 
 For a remote hub, set `PI_COMS_NET_SERVER_URL` and `PI_COMS_NET_AUTH_TOKEN` in `.env`.
 
+## Install as a Pi package
+
+The repository is a [Pi package](https://pi.dev/docs/latest/packages): the `pi` manifest in `package.json` points at `extensions/coms-net.ts`. Anyone running Pi can install the extension without cloning this repo or installing Bun.
+
+```bash
+# From GitHub, pinned to a tag
+pi install https://github.com/zx8086/pi-coms@v0.1.0
+
+# From a shared bundle: unpack pi-coms-<version>.tgz (built with `npm pack`) and point Pi at the directory
+pi install /absolute/path/to/pi-coms
+```
+
+Then connect to a hub and start Pi:
+
+```bash
+export PI_COMS_NET_SERVER_URL=http://127.0.0.1:8787   # hub URL, e.g. the corp hub through an SSM tunnel
+export PI_COMS_NET_AUTH_TOKEN=<token>                 # from the hub operator (just token-create)
+pi --cname <name> --explicit
+```
+
+On the same machine as a hub, both variables can be left unset: the extension discovers `~/.pi/coms-net/projects/default/server.json` and the auto-generated token.
+
+To roll the extension out with a team repository, commit a `.pi/settings.json` containing `"packages": ["https://github.com/zx8086/pi-coms@v0.1.0"]`; Pi installs it on the first trusted start. Running a hub still requires Bun: `bun <package path>/scripts/coms-net-server.ts`.
+
+Do not install the package on a machine where you also run `just coms` from this checkout: the extension would load twice and its tools would collide.
+
 ## Speaking to the fleet
 
 From any client session:
