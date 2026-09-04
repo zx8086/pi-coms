@@ -30,12 +30,14 @@ describe("report", () => {
 
 	test("parseDiagnoses maps by dedup_key and rejects garbage", () => {
 		const good = {
-			diagnoses: [{
-				dedup_key: "alarm:cpu-high:ALARM",
-				probable_cause: "load spike",
-				affected_resources: ["i-123"],
-				suggested_action: "check autoscaling",
-			}],
+			diagnoses: [
+				{
+					dedup_key: "alarm:cpu-high:ALARM",
+					probable_cause: "load spike",
+					affected_resources: ["i-123"],
+					suggested_action: "check autoscaling",
+				},
+			],
 		};
 		const map = parseDiagnoses(good);
 		expect(map?.get("alarm:cpu-high:ALARM")?.probable_cause).toBe("load spike");
@@ -169,11 +171,18 @@ describe("digest notables", () => {
 			...quietDigest,
 			findingCounts: { cert: 1, drift: 1 },
 			notables: [
-				notable({ severity: "critical", family: "cert", resource: "prana-dev.pvhcorp.com", summary: "Certificate prana-dev.pvhcorp.com expires in -979 day(s)" }),
+				notable({
+					severity: "critical",
+					family: "cert",
+					resource: "prana-dev.pvhcorp.com",
+					summary: "Certificate prana-dev.pvhcorp.com expires in -979 day(s)",
+				}),
 				notable(),
 			],
 		});
-		expect(text).toContain("(critical/cert) prana-dev.pvhcorp.com: Certificate prana-dev.pvhcorp.com expires in -979 day(s)");
+		expect(text).toContain(
+			"(critical/cert) prana-dev.pvhcorp.com: Certificate prana-dev.pvhcorp.com expires in -979 day(s)",
+		);
 		expect(text).toContain("(warn/drift) i-059a799316e6d8f5d: instance changed state running -> terminated");
 	});
 
@@ -213,9 +222,7 @@ describe("digest notables", () => {
 		// The shared-services digest of 2026-09-03 reported "uninvestigated: 2"
 		// while the two drift findings sat past the cap, so the operator had
 		// to dig through the source journal to learn which ones they were.
-		const notables = Array.from({ length: 12 }, (_, i) =>
-			notable({ resource: `i-${i}`, uninvestigated: i === 11 }),
-		);
+		const notables = Array.from({ length: 12 }, (_, i) => notable({ resource: `i-${i}`, uninvestigated: i === 11 }));
 		const text = formatDigest({ ...quietDigest, findingCounts: { drift: 12 }, notables });
 		expect(text).toContain("uninvestigated: 1");
 		const line = text.split("\n").find((l) => l.includes("i-11:"));
@@ -260,7 +267,12 @@ describe("notablesFromJournal", () => {
 	test("keeps warn+ rows, drops info, and maps null diagnosis to uninvestigated", () => {
 		const rows = [
 			row({ ...finding, diagnosis: null }),
-			row({ ...finding, severity: "warn", resource: "warned", diagnosis: { probable_cause: "x", affected_resources: [], suggested_action: "y" } }),
+			row({
+				...finding,
+				severity: "warn",
+				resource: "warned",
+				diagnosis: { probable_cause: "x", affected_resources: [], suggested_action: "y" },
+			}),
 			row({ ...finding, severity: "info", resource: "noise", diagnosis: null }),
 		];
 		const notables = notablesFromJournal(rows);
@@ -277,7 +289,11 @@ describe("notablesFromJournal", () => {
 
 describe("suppression review", () => {
 	const ledger = [
-		{ pattern: "alarm:%-Utilization-Low-20:%", reason: "accepted dev rightsizing noise", created_at: "2026-09-01T09:34:00Z" },
+		{
+			pattern: "alarm:%-Utilization-Low-20:%",
+			reason: "accepted dev rightsizing noise",
+			created_at: "2026-09-01T09:34:00Z",
+		},
 		{ pattern: "logs:/aws/msk/brokers:%", reason: "msk rebalance chatter", created_at: "2026-09-01T09:35:00Z" },
 	];
 	const supRow = (suppressed_by: string, dedup_key: string) => ({
@@ -322,7 +338,6 @@ describe("suppression review", () => {
 		expect(text).toContain("accepted dev rightsizing noise");
 		expect(text).toContain("matches last 7d: 43");
 		expect(text).toContain("alarm:kong:ALARM");
-		const zeroLine = text.split("\n").filter((l) => l.includes("msk"));
 		expect(text).toContain("no matches in 7d; candidate for unsuppress");
 	});
 

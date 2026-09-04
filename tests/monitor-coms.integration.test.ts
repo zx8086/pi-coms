@@ -45,13 +45,21 @@ describe("MonitorComs", () => {
 	test("pending entries are bounded: fire-and-forget sends park nothing, awaited replies clear, cap holds", async () => {
 		const hub = await startHub();
 		const agent = new MonitorComs({
-			serverUrl: hub.url, token: TOKEN, project: "default", name: "monitor-aws-123",
-			purpose: "t", onPrompt: async (p) => `pong:${p.prompt}`,
+			serverUrl: hub.url,
+			token: TOKEN,
+			project: "default",
+			name: "monitor-aws-123",
+			purpose: "t",
+			onPrompt: async (p) => `pong:${p.prompt}`,
 		});
 		await agent.start();
 		const peer = new MonitorComs({
-			serverUrl: hub.url, token: TOKEN, project: "default", name: "ops",
-			purpose: "t", onPrompt: async () => "ok",
+			serverUrl: hub.url,
+			token: TOKEN,
+			project: "default",
+			name: "ops",
+			purpose: "t",
+			onPrompt: async () => "ok",
 		});
 		await peer.start();
 

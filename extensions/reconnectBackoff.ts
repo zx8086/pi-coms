@@ -18,6 +18,6 @@ export function reconnectDelay(
 	const baseMs = opts.baseMs ?? RECONNECT_BASE_MS;
 	const maxMs = opts.maxMs ?? RECONNECT_MAX_MS;
 	const random = opts.random ?? Math.random;
-	const base = Math.min(baseMs * Math.pow(2, Math.max(0, attempt)), maxMs);
+	const base = Math.min(baseMs * 2 ** Math.max(0, attempt), maxMs);
 	return { delayMs: Math.round(base * (0.5 + random())), atCeiling: base >= maxMs };
 }

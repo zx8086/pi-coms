@@ -8,12 +8,16 @@ export function extractJsonPayload(text: string): unknown {
 	const t = text.trim();
 	try {
 		return JSON.parse(t);
-	} catch { /* fall through */ }
+	} catch {
+		/* fall through */
+	}
 	const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
 	if (fence) {
 		try {
 			return JSON.parse(fence[1].trim());
-		} catch { /* fall through */ }
+		} catch {
+			/* fall through */
+		}
 	}
 	for (const open of ["{", "["] as const) {
 		const close = open === "{" ? "}" : "]";
@@ -37,7 +41,9 @@ export function extractJsonPayload(text: string): unknown {
 				if (depth === 0) {
 					try {
 						return JSON.parse(t.slice(start, i + 1));
-					} catch { /* try the other delimiter */ }
+					} catch {
+						/* try the other delimiter */
+					}
 					break;
 				}
 			}

@@ -10,10 +10,7 @@ type Cmd = {
 };
 type LogsEvidence = { count: number; overflow: unknown[] };
 
-function fakeClient(
-	groups: string[],
-	eventsByGroup: Record<string, { timestamp: number; message: string }[]>,
-) {
+function fakeClient(groups: string[], eventsByGroup: Record<string, { timestamp: number; message: string }[]>) {
 	return {
 		calls: [] as Cmd[],
 		async send(cmd: Cmd) {
@@ -96,9 +93,13 @@ describe("checkLogs relevance caps", () => {
 	test("per-group cap keeps loudest signatures, folds the rest into one info overflow", async () => {
 		const state = new MonitorState(":memory:");
 		const events = [
-			ev("ERROR alpha broke", 1), ev("ERROR alpha broke", 2), ev("ERROR alpha broke", 3),
-			ev("ERROR beta broke", 4), ev("ERROR beta broke", 5),
-			ev("ERROR gamma broke", 6), ev("ERROR gamma broke", 7),
+			ev("ERROR alpha broke", 1),
+			ev("ERROR alpha broke", 2),
+			ev("ERROR alpha broke", 3),
+			ev("ERROR beta broke", 4),
+			ev("ERROR beta broke", 5),
+			ev("ERROR gamma broke", 6),
+			ev("ERROR gamma broke", 7),
 			ev("ERROR delta broke", 8),
 			ev("ERROR epsilon broke", 9),
 		];
@@ -202,9 +203,13 @@ describe("checkLogs scope tolerance (SIO-1592)", () => {
 
 	test("a denied group is one info scoping finding; the scan continues", async () => {
 		const state = new MonitorState(":memory:");
-		const client = failingClient(["/aws-dynamodb/x", "/aws/app"], { "/aws-dynamodb/x": denied }, {
-			"/aws/app": [{ timestamp: now - 60_000, message: "ERROR real problem" }],
-		});
+		const client = failingClient(
+			["/aws-dynamodb/x", "/aws/app"],
+			{ "/aws-dynamodb/x": denied },
+			{
+				"/aws/app": [{ timestamp: now - 60_000, message: "ERROR real problem" }],
+			},
+		);
 		const out = await checkLogs(client, state, { now });
 		const scope = out.filter((f) => f.severity === "info");
 		const warns = out.filter((f) => f.severity === "warn");
@@ -219,9 +224,13 @@ describe("checkLogs scope tolerance (SIO-1592)", () => {
 
 	test("a non-auth failure on one group skips it without killing the check", async () => {
 		const state = new MonitorState(":memory:");
-		const client = failingClient(["/g1", "/g2"], { "/g1": "ThrottlingException: slow down" }, {
-			"/g2": [{ timestamp: now - 60_000, message: "ERROR still seen" }],
-		});
+		const client = failingClient(
+			["/g1", "/g2"],
+			{ "/g1": "ThrottlingException: slow down" },
+			{
+				"/g2": [{ timestamp: now - 60_000, message: "ERROR still seen" }],
+			},
+		);
 		const out = await checkLogs(client, state, { now });
 		expect(out.filter((f) => f.severity === "warn")).toHaveLength(1);
 	});

@@ -28,9 +28,7 @@ function fakeClient(certs: { arn: string; domain: string; daysLeft: number; sans
 	};
 }
 
-const eu = (certs: Parameters<typeof fakeClient>[0]) => [
-	{ region: "eu-central-1", client: fakeClient(certs) },
-];
+const eu = (certs: Parameters<typeof fakeClient>[0]) => [{ region: "eu-central-1", client: fakeClient(certs) }];
 
 describe("checkCerts", () => {
 	test("inside 30 days is warn, inside 7 days is critical", async () => {
@@ -62,22 +60,18 @@ describe("checkCerts", () => {
 		await checkCerts(eu([{ arn: "arn:cert/a", domain: "a.example.com", daysLeft: 8 }]), state, {
 			now: NOW,
 		});
-		const out = await checkCerts(
-			eu([{ arn: "arn:cert/a", domain: "a.example.com", daysLeft: 6 }]),
-			state,
-			{ now: NOW + 2 * DAY },
-		);
+		const out = await checkCerts(eu([{ arn: "arn:cert/a", domain: "a.example.com", daysLeft: 6 }]), state, {
+			now: NOW + 2 * DAY,
+		});
 		expect(out).toHaveLength(1);
 		expect(out[0].severity).toBe("critical");
 	});
 
 	test("healthy estate produces nothing", async () => {
 		const state = new MonitorState(":memory:");
-		const out = await checkCerts(
-			eu([{ arn: "arn:cert/c", domain: "c.example.com", daysLeft: 90 }]),
-			state,
-			{ now: NOW },
-		);
+		const out = await checkCerts(eu([{ arn: "arn:cert/c", domain: "c.example.com", daysLeft: 90 }]), state, {
+			now: NOW,
+		});
 		expect(out).toHaveLength(0);
 	});
 });
@@ -186,14 +180,19 @@ describe("checkCerts multi-region", () => {
 		);
 		expect(out).toHaveLength(2);
 		const byArn = new Map(out.map((f) => [(f.evidence as CertEvidence).arn, f]));
-		expect((byArn.get("arn:eu/a")?.evidence as CertEvidence).region).toBe("eu-central-1");
-		expect((byArn.get("arn:us/b")?.evidence as CertEvidence).region).toBe("us-east-1");
+		const regionOf = (arn: string) => (byArn.get(arn)?.evidence as CertEvidence | undefined)?.region;
+		expect(regionOf("arn:eu/a")).toBe("eu-central-1");
+		expect(regionOf("arn:us/b")).toBe("us-east-1");
 		expect(byArn.get("arn:us/b")?.summary).toContain("us-east-1");
 	});
 
 	test("a throwing region yields one info scoping finding and the other region still scans", async () => {
 		const state = new MonitorState(":memory:");
-		const broken = { send: async () => { throw new Error("AccessDenied"); } };
+		const broken = {
+			send: async () => {
+				throw new Error("AccessDenied");
+			},
+		};
 		const run = () =>
 			checkCerts(
 				[
@@ -238,10 +237,7 @@ describe("certRegions", () => {
 	});
 
 	test("env list overrides the default, trimmed and deduplicated", () => {
-		expect(certRegions("eu-central-1", " eu-west-1, us-east-1 ,eu-west-1")).toEqual([
-			"eu-west-1",
-			"us-east-1",
-		]);
+		expect(certRegions("eu-central-1", " eu-west-1, us-east-1 ,eu-west-1")).toEqual(["eu-west-1", "us-east-1"]);
 	});
 
 	test("an unset host region still yields us-east-1", () => {

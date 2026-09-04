@@ -11,9 +11,11 @@ function fakeClient(
 		async send(cmd: { constructor: { name: string } }) {
 			if (cmd.constructor.name === "DescribeInstancesCommand") {
 				return {
-					Reservations: [{
-						Instances: instances.map((i) => ({ InstanceId: i.id, State: { Name: i.state } })),
-					}],
+					Reservations: [
+						{
+							Instances: instances.map((i) => ({ InstanceId: i.id, State: { Name: i.state } })),
+						},
+					],
 				};
 			}
 			if (cmd.constructor.name === "DescribeInstanceStatusCommand") {
@@ -58,19 +60,13 @@ describe("checkDrift", () => {
 
 	test("failed status check is warn once and clears on recovery", async () => {
 		const state = new MonitorState(":memory:");
-		const bad = fakeClient(
-			[{ id: "i-1", state: "running" }],
-			[{ id: "i-1", system: "impaired", instance: "ok" }],
-		);
+		const bad = fakeClient([{ id: "i-1", state: "running" }], [{ id: "i-1", system: "impaired", instance: "ok" }]);
 		await checkDrift(fakeClient([{ id: "i-1", state: "running" }]), state); // baseline
 		const out = await checkDrift(bad, state);
 		expect(out).toHaveLength(1);
 		expect(out[0].summary).toContain("status check");
 		expect(await checkDrift(bad, state)).toHaveLength(0);
-		const good = fakeClient(
-			[{ id: "i-1", state: "running" }],
-			[{ id: "i-1", system: "ok", instance: "ok" }],
-		);
+		const good = fakeClient([{ id: "i-1", state: "running" }], [{ id: "i-1", system: "ok", instance: "ok" }]);
 		await checkDrift(good, state);
 		const badAgain = await checkDrift(bad, state);
 		expect(badAgain).toHaveLength(1);

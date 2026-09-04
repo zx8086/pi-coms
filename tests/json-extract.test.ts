@@ -17,22 +17,20 @@ test("bare JSON array", () => {
 });
 
 test("fenced with language tag", () => {
-	expect(extractJsonPayload("```json\n" + json + "\n```")).toEqual(obj);
+	expect(extractJsonPayload(`\`\`\`json\n${json}\n\`\`\``)).toEqual(obj);
 });
 
 test("fenced without language tag", () => {
-	expect(extractJsonPayload("```\n" + json + "\n```")).toEqual(obj);
+	expect(extractJsonPayload(`\`\`\`\n${json}\n\`\`\``)).toEqual(obj);
 });
 
 test("prose before and after the object", () => {
-	expect(
-		extractJsonPayload("Here is my diagnosis:\n\n" + json + "\n\nLet me know if you need more."),
-	).toEqual(obj);
+	expect(extractJsonPayload(`Here is my diagnosis:\n\n${json}\n\nLet me know if you need more.`)).toEqual(obj);
 });
 
 test("braces inside JSON strings do not break extraction", () => {
 	const tricky = { note: 'contains } and { and "quoted \\" brace }"' };
-	expect(extractJsonPayload("reply: " + JSON.stringify(tricky) + " done")).toEqual(tricky);
+	expect(extractJsonPayload(`reply: ${JSON.stringify(tricky)} done`)).toEqual(tricky);
 });
 
 test("no JSON at all returns undefined", () => {

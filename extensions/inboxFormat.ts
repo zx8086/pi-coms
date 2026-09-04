@@ -18,18 +18,14 @@ const replyOf = (m: InboxMessage, full: boolean): string => {
 	if (m.error) return `\n  reply: (${m.error})`;
 	if (m.response == null) return "";
 	const text = typeof m.response === "string" ? m.response : JSON.stringify(m.response);
-	const shown = full || text.length <= INBOX_PREVIEW_CHARS ? text : text.slice(0, INBOX_PREVIEW_CHARS) + " …";
+	const shown = full || text.length <= INBOX_PREVIEW_CHARS ? text : `${text.slice(0, INBOX_PREVIEW_CHARS)} …`;
 	return `\n  reply: ${indent(shown)}`;
 };
 
 const entry = (m: InboxMessage, body: string, full = false): string =>
 	`[${m.created_at}] from ${m.sender_name} (${m.status}) msg_id ${m.msg_id}\n  ${indent(body)}${replyOf(m, full)}`;
 
-export function formatInbox(
-	name: string,
-	messages: InboxMessage[],
-	opts: { msgId?: string } = {},
-): string {
+export function formatInbox(name: string, messages: InboxMessage[], opts: { msgId?: string } = {}): string {
 	if (opts.msgId) {
 		const m = messages.find((x) => x.msg_id === opts.msgId);
 		if (!m) {

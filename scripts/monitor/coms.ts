@@ -166,8 +166,7 @@ export class MonitorComs {
 					const { done, value } = await reader.read();
 					if (done) break;
 					buf += dec.decode(value, { stream: true });
-					let idx: number;
-					while ((idx = buf.indexOf("\n\n")) >= 0) {
+					for (let idx = buf.indexOf("\n\n"); idx >= 0; idx = buf.indexOf("\n\n")) {
 						const frame = buf.slice(0, idx);
 						buf = buf.slice(idx + 2);
 						this.handleFrame(frame);

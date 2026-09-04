@@ -57,9 +57,7 @@ const REVIEW_CRON = process.env.PI_MONITOR_REVIEW_CRON ?? "@weekly";
 const REVIEW_WINDOW_DAYS = Number(process.env.PI_MONITOR_REVIEW_WINDOW_DAYS ?? 7);
 const INVESTIGATE_TARGET = process.env.PI_MONITOR_INVESTIGATE_TARGET ?? `aws-${ACCOUNT_ID}`;
 const INVESTIGATE_TIMEOUT_MS = Number(process.env.PI_MONITOR_INVESTIGATE_TIMEOUT_MS ?? 300_000);
-const INVESTIGATE_PER_FINDING_MS = Number(
-	process.env.PI_MONITOR_INVESTIGATE_PER_FINDING_MS ?? 60_000,
-);
+const INVESTIGATE_PER_FINDING_MS = Number(process.env.PI_MONITOR_INVESTIGATE_PER_FINDING_MS ?? 60_000);
 const INVESTIGATE_MAX_MS = Number(process.env.PI_MONITOR_INVESTIGATE_MAX_MS ?? 1_800_000);
 
 // A flat await discards an agent's completed work whenever the batch is big
@@ -83,8 +81,7 @@ const LOGS_EXCLUDE = (process.env.PI_MONITOR_LOGS_EXCLUDE ?? "")
 	.split(",")
 	.map((s) => s.trim())
 	.filter(Boolean);
-const JOURNAL_RETAIN_MS =
-	Number(process.env.PI_MONITOR_JOURNAL_RETAIN_DAYS ?? 90) * 86_400_000;
+const JOURNAL_RETAIN_MS = Number(process.env.PI_MONITOR_JOURNAL_RETAIN_DAYS ?? 90) * 86_400_000;
 const INGEST_MIN_EVENTS = Number(process.env.PI_MONITOR_INGEST_MIN_EVENTS ?? 10);
 const WATCHLIST = (process.env.PI_MONITOR_WATCHLIST ?? "")
 	.split(",")
@@ -92,8 +89,7 @@ const WATCHLIST = (process.env.PI_MONITOR_WATCHLIST ?? "")
 	.filter(Boolean);
 const CERT_WARN_DAYS = Number(process.env.PI_MONITOR_CERT_WARN_DAYS ?? 30);
 const CERT_CRIT_DAYS = Number(process.env.PI_MONITOR_CERT_CRIT_DAYS ?? 7);
-const STATE_DB =
-	process.env.PI_MONITOR_STATE_DB ?? path.join(os.homedir(), ".pi", "monitor", "state.db");
+const STATE_DB = process.env.PI_MONITOR_STATE_DB ?? path.join(os.homedir(), ".pi", "monitor", "state.db");
 
 export type InvestigationOutcome = {
 	diagnoses: Map<string, Diagnosis> | null;
@@ -106,16 +102,12 @@ export type CycleDeps = {
 	gate?: { name: string; run: () => Promise<{ findings: Finding[]; healthy: boolean }> };
 	checks: { name: string; run: () => Promise<Finding[]> }[];
 	state: MonitorState;
-	investigate:
-		| ((findings: Finding[], priorContext: string) => Promise<InvestigationOutcome>)
-		| null;
+	investigate: ((findings: Finding[], priorContext: string) => Promise<InvestigationOutcome>) | null;
 	report: (text: string) => Promise<void>;
 	log: (line: string) => void;
 };
 
-export async function runCycle(
-	deps: CycleDeps,
-): Promise<{ findings: Finding[]; suppressed: number }> {
+export async function runCycle(deps: CycleDeps): Promise<{ findings: Finding[]; suppressed: number }> {
 	const collected: Finding[] = [];
 	let gated = false;
 	if (deps.gate) {
@@ -267,10 +259,7 @@ function main(): void {
 		onPrompt: async (p) => handleCommand(p.prompt),
 	});
 
-	const investigate = async (
-		findings: Finding[],
-		prior: string,
-	): Promise<InvestigationOutcome> => {
+	const investigate = async (findings: Finding[], prior: string): Promise<InvestigationOutcome> => {
 		const prompt = [
 			`You are the read-only devops agent for AWS account ${ACCOUNT_ID}. The account monitor detected these findings; investigate with your AWS tools and diagnose each one.`,
 			'Reply ONLY with JSON matching the response schema: an object {"diagnoses": [...]} with one entry per dedup_key.',
@@ -402,7 +391,10 @@ function main(): void {
 			checks: [
 				{ name: "cost", run: () => checkCost(ce, state, { pct: COST_PCT, abs: COST_ABS }) },
 				{ name: "trail", run: () => checkTrail(cloudtrail, state) },
-				{ name: "certs", run: () => checkCerts(acmClients, state, { warnDays: CERT_WARN_DAYS, critDays: CERT_CRIT_DAYS }) },
+				{
+					name: "certs",
+					run: () => checkCerts(acmClients, state, { warnDays: CERT_WARN_DAYS, critDays: CERT_CRIT_DAYS }),
+				},
 				{
 					name: "watchlist",
 					run: () => checkWatchlist(cloudtrail, state, WATCHLIST.length > 0 ? { events: WATCHLIST } : {}),
@@ -459,9 +451,7 @@ function main(): void {
 		if (cmd === "review") return buildSuppressionReview();
 		if (cmd.startsWith("history")) {
 			const rows = state.journalRows(7 * 86_400_000, "finding").slice(-20);
-			return rows.length === 0
-				? "no findings in the last 7 days"
-				: rows.map((r) => `${r.ts} ${r.payload}`).join("\n");
+			return rows.length === 0 ? "no findings in the last 7 days" : rows.map((r) => `${r.ts} ${r.payload}`).join("\n");
 		}
 		if (cmd === "suppressions") {
 			const rows = state.listSuppressions();

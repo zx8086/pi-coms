@@ -34,11 +34,10 @@ function fakeClient(hits: Record<string, { id: string; user: string }[]>, seen: 
 describe("checkWatchlist", () => {
 	test("a watchlist hit is a warn finding with actor evidence", async () => {
 		const state = new MonitorState(":memory:");
-		const out = await checkWatchlist(
-			fakeClient({ StopLogging: [{ id: "e1", user: "mallory" }] }),
-			state,
-			{ now: NOW, events: ["StopLogging", "DeleteTrail"] },
-		);
+		const out = await checkWatchlist(fakeClient({ StopLogging: [{ id: "e1", user: "mallory" }] }), state, {
+			now: NOW,
+			events: ["StopLogging", "DeleteTrail"],
+		});
 		expect(out).toHaveLength(1);
 		expect(out[0].severity).toBe("warn");
 		expect(out[0].summary).toContain("StopLogging");

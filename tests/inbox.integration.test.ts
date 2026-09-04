@@ -31,7 +31,10 @@ describe("shared inbox", () => {
 		const resp = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${TOKEN}` } });
 		const prompts = await readSseEvents(resp, "prompt", 2);
 		await api(hub, "POST", `/v1/messages/${prompts[0].msg_id}/response`, {
-			project: "default", responder_session: "DUTY", response: "ack", error: null,
+			project: "default",
+			responder_session: "DUTY",
+			response: "ack",
+			error: null,
 		});
 		await resp.body?.cancel();
 
@@ -84,13 +87,21 @@ describe("shared inbox", () => {
 		expect(((await r.json()) as InboxListing).messages).toHaveLength(0);
 
 		await api(hub, "POST", `/v1/messages/${prompt.msg_id}/response`, {
-			project: "default", responder_session: "TGT", response: "answer", error: null,
+			project: "default",
+			responder_session: "TGT",
+			response: "answer",
+			error: null,
 		});
 		await resp.body?.cancel();
 		r = await api(hub, "GET", "/v1/mailbox?project=default&name=helper&limit=10");
 		const msgs = ((await r.json()) as InboxListing).messages;
 		expect(msgs).toHaveLength(1);
-		expect(msgs[0]).toMatchObject({ prompt: "quick question", status: "complete", response: "answer", sender_name: "monitor" });
+		expect(msgs[0]).toMatchObject({
+			prompt: "quick question",
+			status: "complete",
+			response: "answer",
+			sender_name: "monitor",
+		});
 		// the shared ops inbox is untouched by conversations with other names
 		const ops = await api(hub, "GET", "/v1/mailbox?project=default&name=ops&limit=10");
 		expect(((await ops.json()) as InboxListing).messages).toHaveLength(0);
@@ -109,7 +120,10 @@ describe("shared inbox", () => {
 		await send(hub, "SENDER", "helper", "remember me");
 		const [prompt] = await readSseEvents(resp, "prompt", 1);
 		await api(hub, "POST", `/v1/messages/${prompt.msg_id}/response`, {
-			project: "default", responder_session: "TGT", response: "kept", error: null,
+			project: "default",
+			responder_session: "TGT",
+			response: "kept",
+			error: null,
 		});
 		await resp.body?.cancel();
 
@@ -135,7 +149,7 @@ describe("shared inbox", () => {
 
 	test("mailbox endpoint requires auth and a name", async () => {
 		const hub = await startHub();
-		const noAuth = await fetch(hub.url + "/v1/mailbox?name=ops");
+		const noAuth = await fetch(`${hub.url}/v1/mailbox?name=ops`);
 		expect(noAuth.status).toBe(401);
 		const noName = await api(hub, "GET", "/v1/mailbox?project=default");
 		expect(noName.status).toBe(400);

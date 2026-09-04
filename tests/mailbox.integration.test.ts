@@ -48,9 +48,9 @@ describe("mailbox send", () => {
 		const db = path.join(hub.home, ".pi", "coms-net", "projects", "default", "messages.db");
 		expect(fs.existsSync(db)).toBe(true);
 		const { Database } = await import("bun:sqlite");
-		const row = new Database(db, { readonly: true })
-			.query("SELECT expires_at FROM messages")
-			.get() as { expires_at: string };
+		const row = new Database(db, { readonly: true }).query("SELECT expires_at FROM messages").get() as {
+			expires_at: string;
+		};
 		const ttl = Date.parse(row.expires_at) - Date.now();
 		expect(ttl).toBeLessThanOrEqual(1_209_600_000 + 5_000);
 		expect(ttl).toBeGreaterThan(1_200_000_000);

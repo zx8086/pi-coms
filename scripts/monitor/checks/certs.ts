@@ -31,7 +31,10 @@ export type RegionalAcm = { region: string; client: AwsClient };
 // live in us-east-1, so an expiring one is invisible to a host-region scan.
 export function certRegions(hostRegion: string | undefined, envList: string | undefined): string[] {
 	const list = envList
-		? envList.split(",").map((r) => r.trim()).filter((r) => r.length > 0)
+		? envList
+				.split(",")
+				.map((r) => r.trim())
+				.filter((r) => r.length > 0)
 		: [hostRegion, "us-east-1"].filter((r): r is string => typeof r === "string" && r.length > 0);
 	return [...new Set(list)];
 }
@@ -105,8 +108,7 @@ export async function checkCerts(
 		// to this region (CloudFront needs us-east-1), so cross-region
 		// supersession would mask a real gap.
 		const successor = certs.find(
-			(s) =>
-				s.arn !== arn && s.region === region && s.daysLeft > warnDays && s.names.some((n) => covers(n, domain)),
+			(s) => s.arn !== arn && s.region === region && s.daysLeft > warnDays && s.names.some((n) => covers(n, domain)),
 		);
 		const severity = successor ? "info" : daysLeft <= critDays ? "critical" : "warn";
 		const key = `cert:${arn}:${severity}`;

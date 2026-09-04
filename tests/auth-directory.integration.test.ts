@@ -18,7 +18,7 @@ import {
 const tmpDirs: string[] = [];
 afterEach(async () => {
 	await stopAllHubs();
-	while (tmpDirs.length) fs.rmSync(tmpDirs.pop()!, { recursive: true, force: true });
+	for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 const SIMON_TOKEN = "token-simon-0000000000000000";
@@ -27,14 +27,17 @@ const AGENT_TOKEN = "token-agent-2222222222222222";
 const KIM_TOKEN = "token-kim-333333333333333333";
 
 function writeDirectory(file: string): void {
-	fs.writeFileSync(file, JSON.stringify({
-		principals: {
-			simon: { token: SIMON_TOKEN, kind: "operator", names: ["simon", "ops"] },
-			jane: { token: JANE_TOKEN, kind: "operator", names: ["jane", "ops"] },
-			"eu-oit-dev": { token: AGENT_TOKEN, kind: "agent", names: ["eu-oit-dev", "monitor-eu-oit-dev"] },
-			kim: { token: KIM_TOKEN, kind: "operator", names: ["kim"] },
-		},
-	}));
+	fs.writeFileSync(
+		file,
+		JSON.stringify({
+			principals: {
+				simon: { token: SIMON_TOKEN, kind: "operator", names: ["simon", "ops"] },
+				jane: { token: JANE_TOKEN, kind: "operator", names: ["jane", "ops"] },
+				"eu-oit-dev": { token: AGENT_TOKEN, kind: "agent", names: ["eu-oit-dev", "monitor-eu-oit-dev"] },
+				kim: { token: KIM_TOKEN, kind: "operator", names: ["kim"] },
+			},
+		}),
+	);
 }
 
 async function startDirectoryHub(refreshMs = 60_000) {
@@ -54,10 +57,22 @@ describe("directory auth", () => {
 		const { hub } = await startDirectoryHub();
 		await register(hub, "S1", "simon", SIMON_TOKEN);
 
-		const bad = await api(hub, "POST", "/v1/agents/register", {
-			project: "default", session_id: "S2", name: "eu-oit-dev", purpose: "",
-			model: "t", color: "#888888", cwd: "/tmp", explicit: false,
-		}, SIMON_TOKEN);
+		const bad = await api(
+			hub,
+			"POST",
+			"/v1/agents/register",
+			{
+				project: "default",
+				session_id: "S2",
+				name: "eu-oit-dev",
+				purpose: "",
+				model: "t",
+				color: "#888888",
+				cwd: "/tmp",
+				explicit: false,
+			},
+			SIMON_TOKEN,
+		);
 		expect(bad.status).toBe(403);
 
 		const unknown = await api(hub, "GET", "/v1/agents?project=default", undefined, "not-a-real-token");
@@ -67,10 +82,22 @@ describe("directory auth", () => {
 	test("a name held by another principal is 409, not auto-suffixed", async () => {
 		const { hub } = await startDirectoryHub();
 		await register(hub, "S1", "ops", SIMON_TOKEN);
-		const clash = await api(hub, "POST", "/v1/agents/register", {
-			project: "default", session_id: "J1", name: "ops", purpose: "",
-			model: "t", color: "#888888", cwd: "/tmp", explicit: false,
-		}, JANE_TOKEN);
+		const clash = await api(
+			hub,
+			"POST",
+			"/v1/agents/register",
+			{
+				project: "default",
+				session_id: "J1",
+				name: "ops",
+				purpose: "",
+				model: "t",
+				color: "#888888",
+				cwd: "/tmp",
+				explicit: false,
+			},
+			JANE_TOKEN,
+		);
 		expect(clash.status).toBe(409);
 		// jane can still register under her own name
 		await register(hub, "J1", "jane", JANE_TOKEN);
@@ -87,11 +114,22 @@ describe("directory auth", () => {
 		const sseUrl = await register(hub, "AG", "eu-oit-dev", AGENT_TOKEN);
 		const resp = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${AGENT_TOKEN}` } });
 		await Bun.sleep(100);
-		const s = await api(hub, "POST", "/v1/messages", {
-			project: "default", sender_session: "OP", target: "eu-oit-dev",
-			target_session: null, prompt: "hello", conversation_id: null,
-			response_schema: null, hops: 0,
-		}, SIMON_TOKEN);
+		const s = await api(
+			hub,
+			"POST",
+			"/v1/messages",
+			{
+				project: "default",
+				sender_session: "OP",
+				target: "eu-oit-dev",
+				target_session: null,
+				prompt: "hello",
+				conversation_id: null,
+				response_schema: null,
+				hops: 0,
+			},
+			SIMON_TOKEN,
+		);
 		expect(s.status).toBe(200);
 		const [prompt] = await readSseEvents(resp, "prompt", 1);
 		expect(prompt.prompt).toBe("hello");
@@ -148,8 +186,15 @@ describe("directory auth", () => {
 		await register(hub, "S1", "simon", SIMON_TOKEN);
 		await register(hub, "J1", "jane", JANE_TOKEN);
 		const body = (sender: string) => ({
-			project: "default", sender_session: sender, target: "simon", target_session: null,
-			prompt: "hi", conversation_id: null, response_schema: null, hops: 0, ttl_ms: 60_000,
+			project: "default",
+			sender_session: sender,
+			target: "simon",
+			target_session: null,
+			prompt: "hi",
+			conversation_id: null,
+			response_schema: null,
+			hops: 0,
+			ttl_ms: 60_000,
 		});
 		expect((await api(hub, "POST", "/v1/messages", body("S1"), JANE_TOKEN)).status).toBe(403);
 		expect((await api(hub, "POST", "/v1/messages", body("J1"), JANE_TOKEN)).status).toBe(200);
@@ -161,10 +206,22 @@ describe("directory auth", () => {
 		const sseUrl = await register(hub, "AG", "eu-oit-dev", AGENT_TOKEN);
 		const resp = await fetch(hub.url + sseUrl, { headers: { authorization: `Bearer ${AGENT_TOKEN}` } });
 		await readSseEvents(resp, "hello", 1);
-		const s = await api(hub, "POST", "/v1/messages", {
-			project: "default", sender_session: "OP", target: "eu-oit-dev", target_session: null,
-			prompt: "question", conversation_id: null, response_schema: null, hops: 0,
-		}, SIMON_TOKEN);
+		const s = await api(
+			hub,
+			"POST",
+			"/v1/messages",
+			{
+				project: "default",
+				sender_session: "OP",
+				target: "eu-oit-dev",
+				target_session: null,
+				prompt: "question",
+				conversation_id: null,
+				response_schema: null,
+				hops: 0,
+			},
+			SIMON_TOKEN,
+		);
 		expect(s.status).toBe(200);
 		const msg_id = ((await s.json()) as SendResponse).msg_id;
 		await readSseEvents(resp, "prompt", 1);
@@ -178,11 +235,23 @@ describe("directory auth", () => {
 	test("shared inbox: a principal without the ops name still reads the ops history", async () => {
 		const { hub } = await startDirectoryHub();
 		await register(hub, "AG", "eu-oit-dev", AGENT_TOKEN);
-		const s = await api(hub, "POST", "/v1/messages", {
-			project: "default", sender_session: "AG", target: "ops", target_session: null,
-			prompt: "nightly digest", conversation_id: null, response_schema: null, hops: 0,
-			ttl_ms: 3_600_000,
-		}, AGENT_TOKEN);
+		const s = await api(
+			hub,
+			"POST",
+			"/v1/messages",
+			{
+				project: "default",
+				sender_session: "AG",
+				target: "ops",
+				target_session: null,
+				prompt: "nightly digest",
+				conversation_id: null,
+				response_schema: null,
+				hops: 0,
+				ttl_ms: 3_600_000,
+			},
+			AGENT_TOKEN,
+		);
 		expect(s.status).toBe(200);
 
 		const kim = await api(hub, "GET", "/v1/mailbox?project=default&name=ops", undefined, KIM_TOKEN);

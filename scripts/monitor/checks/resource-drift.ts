@@ -39,12 +39,7 @@ function canonical(v: unknown): string {
 	return JSON.stringify(v);
 }
 
-function diffSnapshot(
-	state: MonitorState,
-	current: Record<string, string>,
-	at: string,
-	d: Differ,
-): Finding[] {
+function diffSnapshot(state: MonitorState, current: Record<string, string>, d: Differ): Finding[] {
 	const findings: Finding[] = [];
 	const prev = state.getSnapshot(d.snapshot);
 	if (prev !== null) {
@@ -125,7 +120,10 @@ async function scanRouteTables(ec2: AwsClient): Promise<Record<string, string>> 
 		for (const t of resp.RouteTables ?? []) {
 			if (!t.RouteTableId) continue;
 			const routes = (t.Routes ?? [])
-				.map((r) => `${r.DestinationCidrBlock ?? r.DestinationPrefixListId ?? r.DestinationIpv6CidrBlock ?? "?"}->${routeTarget(r)}:${r.State ?? "?"}`)
+				.map(
+					(r) =>
+						`${r.DestinationCidrBlock ?? r.DestinationPrefixListId ?? r.DestinationIpv6CidrBlock ?? "?"}->${routeTarget(r)}:${r.State ?? "?"}`,
+				)
 				.sort();
 			current[t.RouteTableId] = canonical(routes);
 		}
@@ -205,7 +203,7 @@ export async function checkResourceDrift(
 		{
 			name: "security-groups",
 			run: async () =>
-				diffSnapshot(state, await scanSecurityGroups(ec2), at, {
+				diffSnapshot(state, await scanSecurityGroups(ec2), {
 					snapshot: "security-groups",
 					added: (id) => info(id, `New security group ${id}`, `drift:${id}:new`, {}, at),
 					removed: (id) => info(id, `Security group ${id} deleted`, `drift:${id}:gone`, {}, at),
@@ -223,7 +221,7 @@ export async function checkResourceDrift(
 		{
 			name: "route-tables",
 			run: async () =>
-				diffSnapshot(state, await scanRouteTables(ec2), at, {
+				diffSnapshot(state, await scanRouteTables(ec2), {
 					snapshot: "route-tables",
 					added: (id) => info(id, `New route table ${id}`, `drift:${id}:new`, {}, at),
 					removed: (id) => info(id, `Route table ${id} deleted`, `drift:${id}:gone`, {}, at),
@@ -241,18 +239,15 @@ export async function checkResourceDrift(
 		{
 			name: "rds-instances",
 			run: async () =>
-				diffSnapshot(state, await scanRdsInstances(rds), at, {
+				diffSnapshot(state, await scanRdsInstances(rds), {
 					snapshot: "rds-instances",
 					added: (id) => info(id, `New RDS instance ${id}`, `drift:${id}:new`, {}, at),
 					removed: (id) => info(id, `RDS instance ${id} deleted`, `drift:${id}:gone`, {}, at),
 					changed: (id, was, now) => {
 						const w = parseRds(was);
 						const n = parseRds(now);
-						const severity = !w.publiclyAccessible && n.publiclyAccessible
-							? "critical"
-							: w.status !== n.status
-								? "warn"
-								: "info";
+						const severity =
+							!w.publiclyAccessible && n.publiclyAccessible ? "critical" : w.status !== n.status ? "warn" : "info";
 						return {
 							family: "drift",
 							severity,
@@ -271,7 +266,7 @@ export async function checkResourceDrift(
 		{
 			name: "lambda-functions",
 			run: async () =>
-				diffSnapshot(state, await scanLambdaFunctions(lambda), at, {
+				diffSnapshot(state, await scanLambdaFunctions(lambda), {
 					snapshot: "lambda-functions",
 					added: (id) => info(id, `New Lambda function ${id}`, `drift:${id}:new`, {}, at),
 					removed: (id) => info(id, `Lambda function ${id} deleted`, `drift:${id}:gone`, {}, at),

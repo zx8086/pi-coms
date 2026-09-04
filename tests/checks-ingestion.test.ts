@@ -4,7 +4,6 @@ import { checkIngestion } from "../scripts/monitor/checks/ingestion.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 const HOUR = 3_600_000;
-const DAY = 86_400_000;
 // Fixed "now" 10 minutes past an hour boundary; the check observes the last
 // full hour before that boundary.
 const NOW = Math.floor(Date.parse("2026-09-01T12:00:00Z") / HOUR) * HOUR + 600_000;
@@ -70,11 +69,7 @@ describe("checkIngestion", () => {
 
 	test("excluded prefixes are skipped", async () => {
 		const state = new MonitorState(":memory:");
-		const out = await checkIngestion(
-			fakeClient({ "/aws/events/trail": activeBaseline(0) }),
-			state,
-			{ now: NOW },
-		);
+		const out = await checkIngestion(fakeClient({ "/aws/events/trail": activeBaseline(0) }), state, { now: NOW });
 		expect(out).toHaveLength(0);
 	});
 
@@ -90,11 +85,9 @@ describe("checkIngestion", () => {
 		const state = new MonitorState(":memory:");
 		// /ecs/a silent, /ecs/a-b healthy: recovery/clear on one must not
 		// touch the other.
-		await checkIngestion(
-			fakeClient({ "/ecs/a": activeBaseline(0), "/ecs/a-b": activeBaseline(50) }),
-			state,
-			{ now: NOW },
-		);
+		await checkIngestion(fakeClient({ "/ecs/a": activeBaseline(0), "/ecs/a-b": activeBaseline(50) }), state, {
+			now: NOW,
+		});
 		const rec = await checkIngestion(
 			fakeClient({ "/ecs/a": activeBaseline(60), "/ecs/a-b": activeBaseline(50) }),
 			state,
