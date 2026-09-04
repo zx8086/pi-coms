@@ -209,12 +209,32 @@ describe("digest notables", () => {
 		expect(text).toContain("+3 more warn+ finding(s)");
 	});
 
-	test("uninvestigated total counts findings beyond the display cap", () => {
+	test("uninvestigated findings are always named, even past the display cap", () => {
+		// The shared-services digest of 2026-09-03 reported "uninvestigated: 2"
+		// while the two drift findings sat past the cap, so the operator had
+		// to dig through the source journal to learn which ones they were.
 		const notables = Array.from({ length: 12 }, (_, i) =>
 			notable({ resource: `i-${i}`, uninvestigated: i === 11 }),
 		);
 		const text = formatDigest({ ...quietDigest, findingCounts: { drift: 12 }, notables });
 		expect(text).toContain("uninvestigated: 1");
+		const line = text.split("\n").find((l) => l.includes("i-11:"));
+		expect(line).toContain("[uninvestigated]");
+		expect(text).toContain("+2 more warn+ finding(s)");
+	});
+
+	test("uninvestigated findings lead the list, then severity orders the rest", () => {
+		const text = formatDigest({
+			...quietDigest,
+			findingCounts: { cert: 1, drift: 2 },
+			notables: [
+				notable({ severity: "critical", family: "cert", resource: "crit-investigated" }),
+				notable({ resource: "warn-investigated" }),
+				notable({ resource: "warn-open", uninvestigated: true }),
+			],
+		});
+		expect(text.indexOf("warn-open")).toBeLessThan(text.indexOf("crit-investigated"));
+		expect(text.indexOf("crit-investigated")).toBeLessThan(text.indexOf("warn-investigated"));
 	});
 
 	test("quiet day digest is unchanged: no notable or uninvestigated lines", () => {

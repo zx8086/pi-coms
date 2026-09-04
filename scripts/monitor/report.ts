@@ -223,9 +223,14 @@ export function formatDigest(d: DigestInput): string {
 	}
 	// Counts alone hide what actually needs follow-up: name every warn+
 	// finding so the digest is reviewable without a journal round-trip.
+	// Uninvestigated findings lead so they always survive the display cap: an
+	// investigated critical already has its diagnosis in an incident report,
+	// an uninvestigated warn has nobody looking at it (SIO-1623).
 	const notables = (d.notables ?? [])
 		.filter((n) => n.severity !== "info")
-		.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
+		.sort((a, b) =>
+			Number(b.uninvestigated) - Number(a.uninvestigated) ||
+			SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
 	if (notables.length > 0) {
 		lines.push("- notable warn+ findings (last 24h):");
 		for (const n of notables.slice(0, NOTABLE_CAP)) {
