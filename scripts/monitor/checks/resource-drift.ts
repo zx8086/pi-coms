@@ -7,6 +7,10 @@ import {
 	type IpPermission,
 	type Route,
 } from "@aws-sdk/client-ec2";
+
+// Re-exported so tests need no direct dependency on the SDK (it lives in scripts/package.json).
+export type { IpPermission };
+
 import { ListFunctionsCommand, type ListFunctionsCommandOutput } from "@aws-sdk/client-lambda";
 import { DescribeDBInstancesCommand, type DescribeDBInstancesCommandOutput } from "@aws-sdk/client-rds";
 import type { Finding } from "../report.ts";

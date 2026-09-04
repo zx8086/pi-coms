@@ -6,6 +6,11 @@ import {
 	ListCertificatesCommand,
 	type ListCertificatesCommandOutput,
 } from "@aws-sdk/client-acm";
+
+// Re-exported so tests need no direct dependency on the SDK (it lives in scripts/package.json).
+export type { DescribeCertificateCommand };
+export { ListCertificatesCommand };
+
 import { errorMessage } from "../errors.ts";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";

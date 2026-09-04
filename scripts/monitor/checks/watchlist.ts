@@ -1,5 +1,9 @@
 // scripts/monitor/checks/watchlist.ts
 import { LookupEventsCommand, type LookupEventsCommandOutput } from "@aws-sdk/client-cloudtrail";
+
+// Re-exported so tests need no direct dependency on the SDK (it lives in scripts/package.json).
+export type { LookupEventsCommand };
+
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";
 import type { AwsClient } from "./alarms.ts";

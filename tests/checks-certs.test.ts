@@ -1,7 +1,11 @@
 // tests/checks-certs.test.ts
 import { describe, expect, test } from "bun:test";
-import { type DescribeCertificateCommand, ListCertificatesCommand } from "@aws-sdk/client-acm";
-import { certRegions, checkCerts } from "../scripts/monitor/checks/certs.ts";
+import {
+	certRegions,
+	checkCerts,
+	type DescribeCertificateCommand,
+	ListCertificatesCommand,
+} from "../scripts/monitor/checks/certs.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 const NOW = Date.parse("2026-09-01T12:00:00Z");

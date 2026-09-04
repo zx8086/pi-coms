@@ -165,7 +165,7 @@ else
     sudo -u "$AGENT_USER" -H git clone --depth 1 "$REPO_URL" "$AGENT_HOME/pi-coms"
   fi
 fi
-sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/bun install --frozen-lockfile --production --omit=peer"
+sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/bun install --frozen-lockfile --production --omit=peer && cd scripts && \$HOME/.bun/bin/bun install --frozen-lockfile --production"
 
 # Spoke operating instructions: Pi loads AGENTS.override.md from cwd ahead of
 # CLAUDE.md, so the agent gets its operating context instead of the repo's

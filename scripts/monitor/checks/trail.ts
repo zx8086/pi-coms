@@ -6,6 +6,11 @@ import {
 	type GetTrailStatusCommandOutput,
 	type Trail,
 } from "@aws-sdk/client-cloudtrail";
+
+// Re-exported so tests need no direct dependency on the SDK (it lives in scripts/package.json).
+export type { GetTrailStatusCommand };
+export { DescribeTrailsCommand };
+
 import { errorMessage } from "../errors.ts";
 import type { Finding } from "../report.ts";
 import type { MonitorState } from "../state.ts";

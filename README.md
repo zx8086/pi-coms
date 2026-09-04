@@ -21,7 +21,8 @@ Each AWS account runs its own agent with a read-only IAM role; from one session 
 ## Setup
 
 ```bash
-bun install
+bun install                       # extension, tests, tooling
+bun install --cwd scripts         # monitor and hub runtime deps (AWS SDK)
 cp .env.sample .env   # fill in provider API keys
 ```
 
