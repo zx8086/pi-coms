@@ -93,7 +93,10 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 # 'thinking.type.enabled is not supported'). Remove a legacy install so
 # the wrapper below cannot point at stale code.
 rm -rf "$HOME/.bun/install/global/node_modules/@mariozechner/pi-coding-agent"
-bun install -g @earendil-works/pi-coding-agent
+# Pinned: an unpinned install picked up 0.85.0 mid-rollout, which fails on Bun
+# (undeclared @earendil-works/pi-server import, SIO-1631). Bump deliberately
+# together with a bundle publish.
+bun install -g @earendil-works/pi-coding-agent@0.84.4
 
 # `bun install -g` leaves a `#!/usr/bin/env node` shebang on the pi symlink, and
 # these hosts have no (or too old a) Node -- pi-tui needs the regex `v` flag.
@@ -162,7 +165,7 @@ else
     sudo -u "$AGENT_USER" -H git clone --depth 1 "$REPO_URL" "$AGENT_HOME/pi-coms"
   fi
 fi
-sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/bun install"
+sudo -u "$AGENT_USER" -H bash -lc "cd '$AGENT_HOME/pi-coms' && \$HOME/.bun/bin/bun install --frozen-lockfile --production --omit=peer"
 
 # Spoke operating instructions: Pi loads AGENTS.override.md from cwd ahead of
 # CLAUDE.md, so the agent gets its operating context instead of the repo's
