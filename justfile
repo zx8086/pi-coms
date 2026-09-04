@@ -15,12 +15,14 @@ coms-net-server-lan:
     -lsof -ti :${PI_COMS_NET_PORT:-52965} | xargs -r kill -TERM 2>/dev/null
     PI_COMS_NET_HOST=0.0.0.0 bun scripts/coms-net-server.ts
 
-# The agent name flag is --cname (pi owns --name). Pass both so pi's session and
-# the coms-net agent share a name, e.g.: just coms --name laptop --cname laptop
+# The agent name flag is --cname (pi owns --name). The recipe sets both from one
+# value: the pi session is named "<cname> <timestamp>" so runs are traceable in
+# pi's session list, and --explicit keeps the operator out of peer auto-discovery.
+# Extra args pass through to pi, e.g.: just coms laptop --model claude-opus-4-7
 
 # Pi with the coms-net client (auto-discovers local server.json)
-coms *args:
-    pi -e extensions/coms-net.ts {{args}}
+coms cname *args:
+    pi -e extensions/coms-net.ts --name "{{cname}} $(date +%Y-%m-%dT%H:%M)" --cname "{{cname}}" --explicit {{args}}
 
 # Fleet auth principals (SSM-backed; IAM on /pi-coms/auth decides who may run these)
 

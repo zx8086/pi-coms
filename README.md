@@ -48,11 +48,11 @@ just coms-net-server           # binds 127.0.0.1, auto-generates a token
 just coms-net-server-lan
 
 # Terminals 2+ -- clients (auto-discover local server.json)
-just coms --name dev --cname dev
-just coms --name prod --cname prod --model claude-opus-4-7   # different model
+just coms dev
+just coms prod --model claude-opus-4-7   # extra args pass through to pi
 ```
 
-The agent name flag is `--cname` (Pi owns `--name` and resumes it across sessions); pass both so the session and the coms agent share a name.
+The agent name flag is `--cname` (Pi owns `--name` and resumes it across sessions). The recipe sets both from one value: the Pi session is named `<name> <timestamp>` so runs are traceable, and `--explicit` keeps the operator out of peer auto-discovery.
 
 For a remote hub, set `PI_COMS_NET_SERVER_URL` and `PI_COMS_NET_AUTH_TOKEN` in `.env`.
 
