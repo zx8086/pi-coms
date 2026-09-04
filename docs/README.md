@@ -14,6 +14,7 @@ Project-specific documentation for pi-coms: peer-to-peer messaging between Pi Co
 | Review trust boundaries and IAM | [Security Model](security/security-model.md) |
 | Deploy the hub or an AWS agent | [Deployment](deployment/deployment.md) |
 | Run and address the fleet | [Usage](development/usage.md) |
+| Let the incident analyzer verify reports through the fleet | [Incident analyzer as a hub client](integrations/incident-analyzer.md) |
 
 ---
 
@@ -46,6 +47,12 @@ Project-specific documentation for pi-coms: peer-to-peer messaging between Pi Co
 | Document | Description |
 |----------|-------------|
 | [usage.md](development/usage.md) | Recipes, connecting to the hub, fleet addressing, flags and environment knobs |
+
+### Integrations
+
+| Document | Description |
+|----------|-------------|
+| [incident-analyzer.md](integrations/incident-analyzer.md) | The DevOps incident analyzer as a `service` principal: token, wire sequence, the verify and investigate prompts spokes receive, `ops` fallback, footprint |
 
 ## Related Documentation
 

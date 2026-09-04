@@ -18,6 +18,16 @@ describe("nameAllowed", () => {
 		expect(nameAllowed(p(["simon-*"]), "janes-simon-x")).toBe(false);
 	});
 
+	// SIO-1635: the incident analyzer service principal registers a fresh
+	// suffixed name per request, so its directory entry is the prefix pattern.
+	test("service principal prefix covers per-request suffixes only", () => {
+		const svc = { principal: "incident-analyzer", kind: "service", names: ["incident-analyzer-*"] };
+		expect(nameAllowed(svc, "incident-analyzer-0f1e2d3c")).toBe(true);
+		expect(nameAllowed(svc, "incident-analyzer")).toBe(false);
+		expect(nameAllowed(svc, "eu-oit-dev")).toBe(false);
+		expect(nameAllowed(svc, "ops")).toBe(false);
+	});
+
 	test("star allows everything", () => {
 		expect(nameAllowed(p(["*"]), "anything")).toBe(true);
 	});

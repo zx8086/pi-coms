@@ -50,6 +50,8 @@ Semantics:
 
 Administration is `just token-create <principal> [names] [kind] [profile]` / `token-revoke` / `token-list` (`deploy/token-admin.sh`), which are thin wrappers over `aws ssm` -- so who may create or revoke tokens is itself an IAM policy on the parameter path, and every action lands in CloudTrail. Tokens are printed once at creation and never stored outside Parameter Store.
 
+Principal kinds in use: `operator` (a person's console; names are their handle plus `ops`), `agent` (a spoke host; names are its alias and `monitor-<alias>`), and `service` (an external system that only sends and awaits, never holds a stream). The one service principal today is the DevOps incident analyzer, minted as `just token-create incident-analyzer "incident-analyzer-*" service`: it registers a fresh suffixed name per request, so its name entry is the prefix pattern rather than an exact name. See [Incident analyzer as a hub client](../integrations/incident-analyzer.md).
+
 ## Network exposure
 
 | Host | Inbound surface | Justification |

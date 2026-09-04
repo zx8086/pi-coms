@@ -48,7 +48,9 @@ one via the EC2 console or `tag:Name=pi-coms-hub-hub` (repo users can run
 Operator sessions load `AGENTS.md` from the repo root -- the console scope
 and synthesis rules. Personal tokens come from the directory
 (`just token-create <principal> <names-csv>` for an admin; each operator
-self-fetches their own SSM parameter).
+self-fetches their own SSM parameter). Non-human clients get a `service`
+principal the same way; the incident analyzer's is described in
+[Incident analyzer as a hub client](../integrations/incident-analyzer.md).
 
 ## Speaking to the fleet
 
