@@ -1,4 +1,4 @@
-// extensions/reconnectBackoff.ts -- shared module (not an extension), no deps
+// extensions/reconnectBackoff.ts
 
 export const RECONNECT_BASE_MS = 500;
 export const RECONNECT_MAX_MS = 10_000;

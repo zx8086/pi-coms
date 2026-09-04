@@ -1,16 +1,4 @@
 // extensions/coms-net.ts
-//
-// Networked Pi agent messaging over a Bun HTTP/SSE hub (scripts/coms-net-server.ts).
-// Tools coms_net_list/send/get/await/broadcast/inbox, slash command /coms-net,
-// widget "coms-net-pool", audit channel "coms-net-log", registry ~/.pi/coms-net/.
-//
-// The agent name flag is --cname, not --name: Pi's own harness owns --name and
-// resumes it across sessions.
-//
-// Usage:
-//   bun scripts/coms-net-server.ts                     # start hub
-//   pi -e extensions/coms-net.ts                       # auto-discover local server.json
-//   pi -e extensions/coms-net.ts --server-url http://host:port --auth-token <tok> --cname planner
 
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -25,8 +13,6 @@ import { formatInbox } from "./inboxFormat.ts";
 import { reconnectDelay } from "./reconnectBackoff.ts";
 import { makeSseParser } from "./sseParser.ts";
 import { claimTurnReplies, lastAssistantText, outboundHops } from "./turnReply.ts";
-
-// ━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const COMS_NET_DIR = path.join(os.homedir(), ".pi", "coms-net");
 const MAX_HOPS = Number(process.env.PI_COMS_NET_MAX_HOPS) || 5;
@@ -43,8 +29,6 @@ const AUTH_TOKEN_ENV = process.env.PI_COMS_NET_AUTH_TOKEN;
 const PROJECT_ENV = process.env.PI_COMS_NET_PROJECT;
 
 const FALLBACK_PALETTE = ["#72F1B8", "#36F9F6", "#FF7EDB", "#FEDE5D", "#C792EA", "#FF8B39", "#4D9DE0", "#FFAA8B"];
-
-// ━━ Shared types (canonical block — mirrored on server) ━━━━━━━━━━━━━━━━━━━
 
 type AgentStatus = "online" | "stale" | "offline";
 type MessageStatus = "queued" | "delivered" | "complete" | "error" | "timeout";
@@ -249,8 +233,6 @@ class HttpError extends Error {
 	}
 }
 
-// ━━ Helpers — verbatim from coms.ts (lines 131-210) ━━━━━━━━━━━━━━━━━━━━━━━━
-
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 function ulid(): string {
@@ -340,9 +322,7 @@ function findSystemPromptPath(argv: string[]): string | null {
 						if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
 							return candidate;
 						}
-					} catch {
-						// fall through
-					}
+					} catch {}
 				}
 			}
 		}
@@ -362,8 +342,6 @@ function readFrontmatterFromArgv(argv: string[]): { name?: string; description?:
 		return {};
 	}
 }
-
-// ━━ Registry / server-discovery I/O ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function projectDir(project: string): string {
 	return path.join(COMS_NET_DIR, "projects", project);
@@ -415,8 +393,6 @@ function resolveAuthToken(project: string, cliFlag: string | undefined): string 
 	return null;
 }
 
-// ━━ CLI flag shape ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 interface CliFlags {
 	name?: string;
 	purpose?: string;
@@ -446,10 +422,7 @@ function readCliFlags(pi: ExtensionAPI): CliFlags {
 	};
 }
 
-// ━━ Default export ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 export default function (pi: ExtensionAPI) {
-	// ━━ Identity flags ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	// Agent name flag is `--cname`: pi's harness owns `--name` and resumes it.
 	pi.registerFlag("cname", {
 		description:
@@ -488,7 +461,6 @@ export default function (pi: ExtensionAPI) {
 		default: undefined,
 	});
 
-	// ━━ Module-scope state ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 	let identity: {
 		session_id: string;
 		name: string;
@@ -529,8 +501,6 @@ export default function (pi: ExtensionAPI) {
 	let lastWidgetSnapshot = "";
 	let shuttingDown = false;
 
-	// ━━ HTTP helper ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 	async function httpFetch<T = unknown>(
 		method: string,
 		urlPath: string,
@@ -556,15 +526,11 @@ export default function (pi: ExtensionAPI) {
 		const timer = setTimeout(() => {
 			try {
 				ac.abort();
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 		}, timeoutMs);
 		try {
 			timer.unref?.();
-		} catch {
-			/* ignore */
-		}
+		} catch {}
 		init.signal = opts?.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal;
 		let resp: Response;
 		try {
@@ -572,17 +538,13 @@ export default function (pi: ExtensionAPI) {
 		} catch (err) {
 			try {
 				clearTimeout(timer);
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			if (opts?.signal?.aborted) throw new Error("coms-net: cancelled");
 			throw new Error(`coms-net: fetch failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 		try {
 			clearTimeout(timer);
-		} catch {
-			/* ignore */
-		}
+		} catch {}
 		const text = await resp.text();
 		let parsed: unknown = null;
 		if (text.length > 0) {
@@ -598,17 +560,11 @@ export default function (pi: ExtensionAPI) {
 		return parsed as T;
 	}
 
-	// ━━ Audit log helper (never throws) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 	function audit(event: string, extra: Record<string, unknown> = {}): void {
 		try {
 			pi.appendEntry("coms-net-log", { event, ts: nowIso(), ...extra });
-		} catch {
-			// best-effort
-		}
+		} catch {}
 	}
-
-	// ━━ Strip auth token from any user-visible error string ━━━━━━━━━━━━━━━
 
 	function safeError(err: unknown): string {
 		const msg = err instanceof Error ? err.message : String(err);
@@ -616,8 +572,6 @@ export default function (pi: ExtensionAPI) {
 		// Defense in depth: never leak the bearer.
 		return msg.split(authToken).join("<redacted>");
 	}
-
-	// ━━ Tool output cap ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	// Peer replies and inbox bodies are unbounded; what reaches the model is
 	// not (pi's own tools stop at 50 KB / 2000 lines). Past the cap the full
@@ -634,13 +588,9 @@ export default function (pi: ExtensionAPI) {
 			const file = path.join(dir, `${label.replace(/[^A-Za-z0-9_.-]/g, "_")}-${ulid()}.txt`);
 			fs.writeFileSync(file, text, "utf-8");
 			note += ` Full output saved to: ${file}`;
-		} catch {
-			/* the truncated text still stands on its own */
-		}
+		} catch {}
 		return `${t.content}\n\n${note}]`;
 	}
-
-	// ━━ Pool snapshot diff (used to gate widget renders) ━━━━━━━━━━━━━━━━━━━
 
 	function poolSnapshotKey(): string {
 		const arr = [...peerCards.values()]
@@ -662,13 +612,9 @@ export default function (pi: ExtensionAPI) {
 		if (currentCtx?.hasUI) {
 			try {
 				installPoolWidget(currentCtx);
-			} catch {
-				// non-fatal
-			}
+			} catch {}
 		}
 	}
-
-	// ━━ SSE event dispatch ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	function applyAgentPatch(prev: AgentCard, patch: Partial<AgentCard>): AgentCard {
 		return { ...prev, ...patch };
@@ -785,9 +731,7 @@ export default function (pi: ExtensionAPI) {
 					},
 					{ deliverAs: "followUp", triggerTurn: false },
 				);
-			} catch {
-				/* notice is best-effort */
-			}
+			} catch {}
 			try {
 				pi.appendEntry("coms-net-log", {
 					event: "mail_in",
@@ -795,9 +739,7 @@ export default function (pi: ExtensionAPI) {
 					msg_id,
 					sender: senderSession,
 				});
-			} catch {
-				/* best-effort */
-			}
+			} catch {}
 			return;
 		}
 
@@ -847,9 +789,7 @@ export default function (pi: ExtensionAPI) {
 					sender: senderSession,
 					hops,
 				});
-			} catch {
-				/* best-effort */
-			}
+			} catch {}
 		} catch (err) {
 			inboundQueue.delete(msg_id);
 			audit("prompt_in_failed", { msg_id, reason: safeError(err) });
@@ -866,9 +806,7 @@ export default function (pi: ExtensionAPI) {
 			pending.result = { response: responseVal, error: errVal };
 			try {
 				pending.resolve(pending.result);
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			try {
 				pi.appendEntry("coms-net-log", {
 					event: "response_in",
@@ -876,24 +814,18 @@ export default function (pi: ExtensionAPI) {
 					msg_id,
 					error: errVal,
 				});
-			} catch {
-				/* best-effort */
-			}
+			} catch {}
 		} else {
 			audit("orphan_response", { msg_id });
 		}
 	}
-
-	// ━━ SSE open + read loop ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	async function openSse(): Promise<void> {
 		if (!serverUrl || !authToken || !sseUrlPath || !identity) return;
 		if (sseAbort) {
 			try {
 				sseAbort.abort();
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 		}
 		const ac = new AbortController();
 		sseAbort = ac;
@@ -915,14 +847,11 @@ export default function (pi: ExtensionAPI) {
 			scheduleReconnect();
 			return;
 		}
-		// Connection established. Reset the backoff state.
 		reconnectAttempts = 0;
 		notifiedReconnectCap = false;
 		try {
 			pi.appendEntry("coms-net-log", { event: "sse_open", ts: nowIso(), url: sseUrlPath });
-		} catch {
-			/* best-effort */
-		}
+		} catch {}
 
 		const parser = makeSseParser((event, data, id) => handleSseEvent(event, data, id));
 		const reader = resp.body.getReader();
@@ -942,9 +871,7 @@ export default function (pi: ExtensionAPI) {
 		} finally {
 			try {
 				reader.releaseLock();
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 		}
 		if (!shuttingDown) {
 			scheduleReconnect();
@@ -962,9 +889,7 @@ export default function (pi: ExtensionAPI) {
 			if (currentCtx?.hasUI) {
 				try {
 					currentCtx.ui.notify("coms-net: reconnect backoff at ceiling", "warning");
-				} catch {
-					/* ignore */
-				}
+				} catch {}
 			}
 		}
 		reconnectTimer = setTimeout(async () => {
@@ -979,9 +904,7 @@ export default function (pi: ExtensionAPI) {
 		}, backoff);
 		try {
 			reconnectTimer.unref?.();
-		} catch {
-			/* ignore */
-		}
+		} catch {}
 	}
 
 	async function reRegisterAndOpen(): Promise<void> {
@@ -990,11 +913,8 @@ export default function (pi: ExtensionAPI) {
 		const reg = await registerAgent();
 		sseUrlPath = reg.sse_url;
 		audit("sse_reconnect", { attempt: reconnectAttempts });
-		// Fire and forget; openSse manages its own lifecycle.
 		void openSse();
 	}
-
-	// ━━ Registration ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	async function registerAgent(): Promise<RegisterResponse> {
 		if (!identity) throw new Error("coms-net: not initialised");
@@ -1023,9 +943,7 @@ export default function (pi: ExtensionAPI) {
 					assigned: resp.agent.name,
 					project: identity.project,
 				});
-			} catch {
-				/* best-effort */
-			}
+			} catch {}
 			// Mail addressed to the requested name will not reach this session;
 			// the operator has to know, not just the audit log (SIO-1613).
 			if (ctx?.hasUI) {
@@ -1034,9 +952,7 @@ export default function (pi: ExtensionAPI) {
 						`coms-net: name "${identity.name}" was taken; registered as "${resp.agent.name}". Messages sent to "${identity.name}" will not reach you.`,
 						"warning",
 					);
-				} catch {
-					/* ignore */
-				}
+				} catch {}
 			}
 			identity.name = resp.agent.name;
 		}
@@ -1048,13 +964,9 @@ export default function (pi: ExtensionAPI) {
 				name: identity.name,
 				project: identity.project,
 			});
-		} catch {
-			/* best-effort */
-		}
+		} catch {}
 		return resp;
 	}
-
-	// ━━ session_start ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	pi.on("session_start", async (_event, ctx) => {
 		currentCtx = ctx;
@@ -1062,7 +974,6 @@ export default function (pi: ExtensionAPI) {
 			if (ctx.hasUI) ctx.ui.notify(msg, level);
 		};
 
-		// 1. Resolve identity from CLI > frontmatter > defaults.
 		const flags = readCliFlags(pi);
 		const fm = readFrontmatterFromArgv(process.argv);
 		const project = flags.project || PROJECT_ENV || "default";
@@ -1073,7 +984,6 @@ export default function (pi: ExtensionAPI) {
 		const desiredName = flags.name || fm.name || defaultName;
 		const purpose = flags.purpose || fm.description || "";
 
-		// Color — fallback chain: --color > frontmatter > deterministic.
 		let color = fallbackColor(session_id);
 		if (fm.color && isValidHex(fm.color)) color = fm.color;
 		if (flags.color && isValidHex(flags.color)) color = flags.color;
@@ -1096,7 +1006,6 @@ export default function (pi: ExtensionAPI) {
 		displayProject = project;
 		includeExplicit = false;
 
-		// 2. Resolve server URL.
 		serverUrl = resolveServerUrl(project, flags.serverUrl);
 		if (!serverUrl) {
 			notify(
@@ -1107,7 +1016,6 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		// 3. Resolve auth token.
 		authToken = resolveAuthToken(project, flags.authToken);
 		if (!authToken) {
 			notify(
@@ -1119,7 +1027,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		// 4. Health check — verify reachability without consuming auth surface.
+		// Health check: verify reachability without consuming auth surface.
 		try {
 			await httpFetch("GET", "/health");
 		} catch (err) {
@@ -1132,7 +1040,6 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		// 5. Register agent.
 		let reg: RegisterResponse;
 		try {
 			reg = await registerAgent();
@@ -1143,7 +1050,6 @@ export default function (pi: ExtensionAPI) {
 		}
 		sseUrlPath = reg.sse_url;
 
-		// 6. Boot audit.
 		try {
 			pi.appendEntry("coms-net-log", {
 				event: "boot",
@@ -1153,11 +1059,9 @@ export default function (pi: ExtensionAPI) {
 				project: identity.project,
 				server_url: serverUrl,
 			});
-		} catch {
-			/* best-effort */
-		}
+		} catch {}
 
-		// 6b. Seed the agent's own coms name into context (SIO-1600). Uses the
+		// Seed the agent's own coms name into context (SIO-1600). Uses the
 		// post-registration identity.name so a hub-renamed session (name2)
 		// reports its real name. Context-only: no turn, not shown to the operator.
 		try {
@@ -1170,23 +1074,17 @@ export default function (pi: ExtensionAPI) {
 				},
 				{ deliverAs: "followUp", triggerTurn: false },
 			);
-		} catch {
-			/* best-effort; identity note is not load-critical */
-		}
+		} catch {}
 
-		// 7. Install widget + status. Success is the default — only failures notify
-		// (status line + widget already convey the connected state).
+		// Success is the default: only failures notify (status line + widget
+		// already convey the connected state).
 		try {
 			ctx.ui.setStatus("coms-net", `coms-net ${identity.name}@${identity.project}`);
 			installPoolWidget(ctx);
-		} catch {
-			// hasUI may be false in some contexts.
-		}
+		} catch {}
 
-		// 8. Open SSE — fire and forget.
 		void openSse();
 
-		// 9. Heartbeat loop.
 		heartbeatTimer = setInterval(() => {
 			if (!identity || shuttingDown) return;
 			const ctxNow = currentCtx;
@@ -1206,12 +1104,8 @@ export default function (pi: ExtensionAPI) {
 		}, HEARTBEAT_MS);
 		try {
 			heartbeatTimer.unref?.();
-		} catch {
-			/* ignore */
-		}
+		} catch {}
 	});
-
-	// ━━ Pool widget rendering ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	function renderPool(width: number, theme: Theme): string[] {
 		interface Row {
@@ -1318,12 +1212,8 @@ export default function (pi: ExtensionAPI) {
 				}),
 				{ placement: "belowEditor" },
 			);
-		} catch {
-			// non-fatal
-		}
+		} catch {}
 	}
-
-	// ━━ Tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	pi.registerTool({
 		name: "coms_net_list",
@@ -1479,9 +1369,7 @@ export default function (pi: ExtensionAPI) {
 					target_session,
 					hops,
 				});
-			} catch {
-				/* best-effort */
-			}
+			} catch {}
 
 			return {
 				content: [
@@ -1539,7 +1427,6 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_callId, params, signal) {
 			const msg_id = params.msg_id;
-			// Local SSE-resolved fast path.
 			const pending = pendingReplies.get(msg_id);
 			if (pending?.result) {
 				const r = pending.result;
@@ -1551,7 +1438,6 @@ export default function (pi: ExtensionAPI) {
 					details: { status: "complete", response: r.response, error: r.error ?? null },
 				};
 			}
-			// Fall back to server.
 			let resp: MessageStatusResponse;
 			try {
 				resp = await httpFetch<MessageStatusResponse>("GET", `/v1/messages/${encodeURIComponent(msg_id)}`, undefined, {
@@ -1736,11 +1622,7 @@ export default function (pi: ExtensionAPI) {
 		if (pending?.result) return pending.result;
 		if (signal?.aborted) return { response: null, error: "cancelled" };
 
-		const localPromise: Promise<ReplyResult> = pending
-			? pending.promise
-			: new Promise(() => {
-					/* never resolves on its own; SSE will */
-				});
+		const localPromise: Promise<ReplyResult> = pending ? pending.promise : new Promise(() => {});
 
 		const serverTimeoutMs = Math.min(timeoutMs, MESSAGE_TIMEOUT_MS);
 		const ac = new AbortController();
@@ -1768,9 +1650,7 @@ export default function (pi: ExtensionAPI) {
 			timer = setTimeout(() => resolve({ response: null, error: "timeout" }), timeoutMs);
 			try {
 				timer.unref?.();
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 		});
 
 		let onAbort: (() => void) | null = null;
@@ -1785,9 +1665,7 @@ export default function (pi: ExtensionAPI) {
 		} finally {
 			try {
 				ac.abort();
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			if (timer) clearTimeout(timer);
 			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 		}
@@ -1831,7 +1709,6 @@ export default function (pi: ExtensionAPI) {
 			const timeoutMs =
 				typeof params.timeout_ms === "number" && params.timeout_ms > 0 ? params.timeout_ms : MESSAGE_TIMEOUT_MS;
 
-			// Resolve targets: explicit list, or every reachable peer in the project.
 			let targets: string[] = params.targets ?? [];
 			if (targets.length === 0) {
 				const resp = await httpFetch<AgentsResponse>(
@@ -1887,9 +1764,7 @@ export default function (pi: ExtensionAPI) {
 								hops,
 								broadcast: true,
 							});
-						} catch {
-							/* best-effort */
-						}
+						} catch {}
 						return { target, msg_id: resp.msg_id as string | null, error: null as string | null };
 					} catch (err) {
 						const detail = err instanceof HttpError ? err.detail() : safeError(err);
@@ -1898,7 +1773,6 @@ export default function (pi: ExtensionAPI) {
 				}),
 			);
 
-			// Gather every reply in parallel.
 			const results = await Promise.all(
 				sends.map(async (s) => {
 					if (!s.msg_id) return { target: s.target, msg_id: null as string | null, response: null, error: s.error };
@@ -1961,8 +1835,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// ━━ agent_end: capture turn output and submit response ━━━━━━━━━━━━━━━━
-
 	pi.on("agent_end", async (event) => {
 		if (!identity || inboundQueue.size === 0) return;
 
@@ -1990,17 +1862,13 @@ export default function (pi: ExtensionAPI) {
 							msg_id: reply.msg_id,
 							error: reply.error,
 						});
-					} catch {
-						/* best-effort */
-					}
+					} catch {}
 				} catch (e) {
 					audit("response_out_failed", { msg_id: reply.msg_id, reason: safeError(e) });
 				}
 			}),
 		);
 	});
-
-	// ━━ /coms-net slash command ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	pi.registerCommand("coms-net", {
 		description: "Refresh the coms-net pool widget; or --all / --project <name> / --server / --reconnect",
@@ -2010,22 +1878,16 @@ export default function (pi: ExtensionAPI) {
 				includeExplicit = !includeExplicit;
 				try {
 					ctx.ui.notify(`coms-net: include_explicit = ${includeExplicit}`, "info");
-				} catch {
-					/* ignore */
-				}
+				} catch {}
 			}
 			if (trimmed.includes("--reconnect")) {
 				try {
 					ctx.ui.notify("coms-net: reconnecting SSE...", "info");
-				} catch {
-					/* ignore */
-				}
+				} catch {}
 				if (sseAbort) {
 					try {
 						sseAbort.abort();
-					} catch {
-						/* ignore */
-					}
+					} catch {}
 					sseAbort = null;
 				}
 				// A scheduled reconnect must not race the manual one.
@@ -2057,12 +1919,9 @@ export default function (pi: ExtensionAPI) {
 				displayProject = projectMatch[1];
 				try {
 					ctx.ui.notify(`coms-net: displaying project ${displayProject}`, "info");
-				} catch {
-					/* ignore */
-				}
+				} catch {}
 			}
 
-			// Bare invocation or after --project: force-refresh.
 			try {
 				const projectFilter = displayProject ?? identity?.project ?? "default";
 				const qs = `?project=${encodeURIComponent(projectFilter)}&include_explicit=${includeExplicit ? "true" : "false"}`;
@@ -2080,8 +1939,6 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// ━━ Clean shutdown (idempotent) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 	async function cleanShutdown(): Promise<void> {
 		if (shuttingDown) return;
 		shuttingDown = true;
@@ -2089,43 +1946,32 @@ export default function (pi: ExtensionAPI) {
 		if (heartbeatTimer) {
 			try {
 				clearInterval(heartbeatTimer);
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			heartbeatTimer = null;
 		}
 		if (reconnectTimer) {
 			try {
 				clearTimeout(reconnectTimer);
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			reconnectTimer = null;
 		}
 		if (sseAbort) {
 			try {
 				sseAbort.abort();
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			sseAbort = null;
 		}
 
-		// Best-effort DELETE with short timeout.
 		if (identity && serverUrl && authToken) {
 			const ac = new AbortController();
 			const t = setTimeout(() => {
 				try {
 					ac.abort();
-				} catch {
-					/* ignore */
-				}
+				} catch {}
 			}, SHUTDOWN_DELETE_TIMEOUT_MS);
 			try {
 				t.unref?.();
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			try {
 				await httpFetch(
 					"DELETE",
@@ -2134,13 +1980,10 @@ export default function (pi: ExtensionAPI) {
 					{ signal: ac.signal },
 				);
 			} catch {
-				// best-effort — server may already be gone.
 			} finally {
 				try {
 					clearTimeout(t);
-				} catch {
-					/* ignore */
-				}
+				} catch {}
 			}
 		}
 
@@ -2151,22 +1994,16 @@ export default function (pi: ExtensionAPI) {
 					ts: nowIso(),
 					session_id: identity.session_id,
 				});
-			} catch {
-				/* best-effort */
-			}
+			} catch {}
 		}
 
 		if (currentCtx?.hasUI) {
 			try {
 				currentCtx.ui.setWidget("coms-net-pool", undefined);
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 			try {
 				currentCtx.ui.setStatus("coms-net", undefined);
-			} catch {
-				/* ignore */
-			}
+			} catch {}
 		}
 	}
 

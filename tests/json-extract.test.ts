@@ -1,7 +1,4 @@
 // tests/json-extract.test.ts
-//
-// SIO-1580: schema-constrained replies must survive markdown fences and prose
-// wrapping -- eu Sonnet 5 rarely emits bare JSON.
 import { expect, test } from "bun:test";
 import { extractJsonPayload } from "../extensions/jsonPayload";
 

@@ -1,9 +1,4 @@
 // scripts/coms-net-monitor.ts
-//
-// Per-host AWS account monitor. Deterministic scheduled checks (zero tokens
-// when quiet); findings warn+ are investigated by the account's Pi agent over
-// coms-net; reports mail to the operator via the hub mailbox with a long TTL.
-// Run as pi-monitor.service; state in ~/.pi/monitor/state.db.
 
 import * as os from "node:os";
 import * as path from "node:path";
@@ -41,7 +36,6 @@ import {
 } from "./monitor/report.ts";
 import { MonitorState } from "./monitor/state.ts";
 
-// Env-with-defaults configuration
 const ACCOUNT_ID = process.env.AWS_ACCOUNT_ID ?? "unknown";
 const MONITOR_NAME = process.env.PI_MONITOR_NAME ?? `monitor-aws-${ACCOUNT_ID}`;
 const REPORT_TO = process.env.PI_MONITOR_REPORT_TO ?? "laptop";
@@ -183,7 +177,6 @@ export async function runCycle(deps: CycleDeps): Promise<{ findings: Finding[]; 
 		}
 	}
 
-	// Retry anything the hub could not take earlier.
 	for (const u of deps.state.unsent()) {
 		try {
 			await deps.report(u.prompt);

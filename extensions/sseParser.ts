@@ -1,4 +1,4 @@
-// extensions/sseParser.ts -- shared module (not an extension), no deps
+// extensions/sseParser.ts
 
 export type SseHandler = (event: string, data: unknown, id?: string) => void;
 
@@ -39,14 +39,10 @@ export function makeSseParser(onEvent: SseHandler): SseParser {
 					let data: unknown = joined;
 					try {
 						data = JSON.parse(joined);
-					} catch {
-						/* keep as string */
-					}
+					} catch {}
 					try {
 						onEvent(event, data, id);
-					} catch {
-						/* ignore handler errors */
-					}
+					} catch {}
 				}
 			}
 		},

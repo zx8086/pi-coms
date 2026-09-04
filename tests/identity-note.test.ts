@@ -1,8 +1,4 @@
 // tests/identity-note.test.ts
-//
-// SIO-1600: agents guess their own coms name and mislabel themselves in
-// replies (a spoke calling itself monitor-<name>). The extension knows the
-// registered name; this note hands it to the model so it never has to guess.
 import { expect, test } from "bun:test";
 import { buildIdentityNote } from "../extensions/identityNote";
 

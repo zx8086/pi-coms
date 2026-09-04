@@ -1,8 +1,4 @@
 // tests/mail-quiet.integration.test.ts
-//
-// SIO-1579: prompt events carry the message's mailbox class so recipients can
-// keep mail out of the model -- mailbox mail is read on demand via the inbox,
-// only interactive (short-TTL) sends may trigger turns.
 import { afterEach, expect, test } from "bun:test";
 import {
 	api,

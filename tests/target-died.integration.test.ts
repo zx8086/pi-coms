@@ -1,8 +1,4 @@
 // tests/target-died.integration.test.ts
-//
-// SIO-1578: when an agent unregisters with delivered-but-unreplied messages,
-// the hub fails each pending msg_id with error "target_died" so senders'
-// awaits resolve immediately instead of hanging until timeout.
 import { afterEach, expect, test } from "bun:test";
 import {
 	api,

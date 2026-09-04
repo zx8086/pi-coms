@@ -1,8 +1,5 @@
 // scripts/monitor/coms.ts
-//
-// Minimal coms-net client for a headless Bun process (no Pi, no TUI).
-// Registers as an explicit peer, answers inbound prompts through a callback,
-// and sends messages with optional ttl_ms for mailbox delivery.
+
 import * as crypto from "node:crypto";
 import { errorMessage } from "./errors.ts";
 
@@ -61,7 +58,6 @@ type PendingReply = {
 type RegisterReply = { agent: { name: string }; sse_url: string; heartbeat_interval_ms?: number };
 type SendReply = { msg_id: string; status: string };
 
-// SSE frame data for the prompt and response events.
 type FramePayload = {
 	msg_id: string;
 	sender?: { name?: string };
