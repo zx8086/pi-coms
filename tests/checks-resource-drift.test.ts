@@ -1,8 +1,7 @@
 // tests/checks-resource-drift.test.ts
 
 import { describe, expect, test } from "bun:test";
-import type { IpPermission } from "@aws-sdk/client-ec2";
-import { checkResourceDrift } from "../scripts/monitor/checks/resource-drift.ts";
+import { checkResourceDrift, type IpPermission } from "../scripts/monitor/checks/resource-drift.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 type Sg = { id: string; ingress?: IpPermission[]; egress?: IpPermission[] };

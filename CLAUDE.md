@@ -8,7 +8,7 @@ Peer-to-peer messaging between Pi Coding Agent instances (`coms-net` over HTTP/S
 
 ## Commands
 
-- Package manager: `bun` (not npm/yarn/pnpm). `bun install` to set up.
+- Package manager: `bun` (not npm/yarn/pnpm). `bun install` plus `bun install --cwd scripts` to set up: the monitor and hub runtime deps live in `scripts/package.json` so `pi install` of the extension downloads nothing.
 - Task runner: `just`; run `just` with no args to list recipes.
 - Run a client: `just coms <name>` (sets pi `--name "<name> <timestamp>"`, `--cname <name>`, `--explicit`; extra args pass to pi); same-machine peers use a hub on `127.0.0.1` (`just coms-net-server`).
 - Hub: `just coms-net-server` (localhost) or `just coms-net-server-lan` (requires `PI_COMS_NET_AUTH_TOKEN`).

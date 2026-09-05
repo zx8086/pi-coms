@@ -1,8 +1,7 @@
 // tests/checks-watchlist.test.ts
 
 import { describe, expect, test } from "bun:test";
-import type { LookupEventsCommand } from "@aws-sdk/client-cloudtrail";
-import { checkWatchlist, DEFAULT_WATCHLIST } from "../scripts/monitor/checks/watchlist.ts";
+import { checkWatchlist, DEFAULT_WATCHLIST, type LookupEventsCommand } from "../scripts/monitor/checks/watchlist.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 const NOW = Date.parse("2026-09-01T12:00:00Z");

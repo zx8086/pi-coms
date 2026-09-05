@@ -1,7 +1,6 @@
 // tests/checks-trail.test.ts
 import { describe, expect, test } from "bun:test";
-import { DescribeTrailsCommand, type GetTrailStatusCommand } from "@aws-sdk/client-cloudtrail";
-import { checkTrail } from "../scripts/monitor/checks/trail.ts";
+import { checkTrail, DescribeTrailsCommand, type GetTrailStatusCommand } from "../scripts/monitor/checks/trail.ts";
 import { MonitorState } from "../scripts/monitor/state.ts";
 
 type TrailStatus = { IsLogging?: boolean; LatestDeliveryError?: string };

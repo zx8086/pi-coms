@@ -25,18 +25,6 @@
     "biome:check:write": "biome check --write .",
     "yaml:check": "yamllint -d relaxed .github/"
   },
-  "dependencies": {
-    "@aws-sdk/client-acm": "^3.1123.0",
-    "@aws-sdk/client-cloudtrail": "^3.1123.0",
-    "@aws-sdk/client-cloudwatch": "^3.1121.0",
-    "@aws-sdk/client-cloudwatch-logs": "^3.1121.0",
-    "@aws-sdk/client-cost-explorer": "^3.1121.0",
-    "@aws-sdk/client-ec2": "^3.1121.0",
-    "@aws-sdk/client-lambda": "^3.1121.0",
-    "@aws-sdk/client-rds": "^3.1121.0",
-    "@aws-sdk/client-sts": "^3.1123.0",
-    "zod": "^4.5.4"
-  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",

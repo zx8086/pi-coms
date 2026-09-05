@@ -26,6 +26,8 @@ trap 'rm -rf "$STAGE"' EXIT
 
 git -C "$REPO_ROOT" archive HEAD | tar -x -C "$STAGE"
 (cd "$STAGE" && bun install --frozen-lockfile --production --omit=peer)
+# The monitor and hub runtime deps live in scripts/package.json (SIO-1632).
+(cd "$STAGE/scripts" && bun install --frozen-lockfile --production)
 echo "$VERSION" > "$STAGE/.bundle-version"
 
 tar -czf "$STAGE.tar.gz" -C "$STAGE" .

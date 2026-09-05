@@ -30,7 +30,7 @@
       "scripts/**",
       "tests/**",
       "*.json",
-      "!node_modules",
+      "!**/node_modules",
       "!bun.lock",
       "!deploy",
       "!guides",
