@@ -7,6 +7,19 @@ afterEach(async () => {
 	await stopAllHubs();
 });
 
+async function sendWithRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			return await fn();
+		} catch (err) {
+			lastError = err;
+			await new Promise((r) => setTimeout(r, 25 * attempt));
+		}
+	}
+	throw lastError;
+}
+
 describe("MonitorComs", () => {
 	test("registers, sends with ttl, and answers inbound prompts", async () => {
 		const hub = await startHub();
@@ -71,14 +84,12 @@ describe("MonitorComs", () => {
 		await peer.awaitReply(sent.msg_id, 10_000);
 		expect(peer.pendingSize()).toBe(0);
 
-		// 210 rapid sends over keep-alive connections; Bun's fetch occasionally
-		// reports a closed socket under CI load, so one retry per send.
+		// 210 rapid sends over keep-alive connections. Bun's fetch reports a closed
+		// socket under CI load, and a single retry was not enough on the shared
+		// runner (SIO-1633). A duplicate send after a lost response cannot change
+		// the result: the assertion is the pending cap, not the send count.
 		for (let i = 0; i < 210; i++) {
-			try {
-				await agent.send("ops", `r${i}`, { ttl_ms: 86_400_000 });
-			} catch {
-				await agent.send("ops", `r${i}`, { ttl_ms: 86_400_000 });
-			}
+			await sendWithRetry(() => agent.send("ops", `r${i}`, { ttl_ms: 86_400_000 }));
 		}
 		expect(agent.pendingSize()).toBe(200);
 
