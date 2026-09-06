@@ -312,12 +312,13 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
       }],
       // Amplify build history (SIO-1648): a finding on an Amplify app cannot
       // be concluded without knowing whether builds ran. ListJobs/GetJob is
-      // the minimum; app, branch, and webhook reads give the context. All
-      // read-only metadata.
+      // the minimum; ListApps finds the app, and app, branch, and webhook
+      // reads give the context. All read-only metadata.
       [{
         Sid    = "AmplifyReads"
         Effect = "Allow"
         Action = [
+          "amplify:ListApps",
           "amplify:ListJobs",
           "amplify:GetJob",
           "amplify:GetApp",
