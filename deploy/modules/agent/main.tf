@@ -310,6 +310,23 @@ resource "aws_iam_role_policy" "devops_readonly_dev_extensions" {
         ]
         Resource = "*"
       }],
+      // Amplify build history (SIO-1648): a finding on an Amplify app cannot
+      // be concluded without knowing whether builds ran. ListJobs/GetJob is
+      // the minimum; app, branch, and webhook reads give the context. All
+      // read-only metadata.
+      [{
+        Sid    = "AmplifyReads"
+        Effect = "Allow"
+        Action = [
+          "amplify:ListJobs",
+          "amplify:GetJob",
+          "amplify:GetApp",
+          "amplify:ListBranches",
+          "amplify:GetBranch",
+          "amplify:ListWebhooks",
+        ]
+        Resource = "*"
+      }],
       // Log-content reads for the monitor's ERROR-log check and the agent's
       // log-reading during diagnosis (SIO-1589). A deliberate widening of the
       // metadata-only posture -- log lines can contain app-printed secrets --

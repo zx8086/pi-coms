@@ -75,7 +75,8 @@ Corp agents run under the production incident analyzer's
 `deploy/modules/agent/policies/`), assumed by the instance role with an
 ExternalId. Named dev extensions live in the inline
 `pi-coms-dev-extensions` policy: Cost Explorer, Bedrock invoke, scheduling
-and history reads, log-content reads, certificate reads, and an explicit
+and history reads, log-content reads, certificate reads, Amplify build
+history reads, and an explicit
 Deny on secret values and data-plane gets. Models run on Amazon Bedrock
 (`eu.anthropic.claude-sonnet-5`) under the same assumed role -- no API keys
 exist anywhere in the system. Details: [Security Model](../security/security-model.md).
