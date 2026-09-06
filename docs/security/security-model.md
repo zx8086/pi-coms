@@ -75,7 +75,7 @@ documents (`deploy/modules/agent/policies/`):
 |---------|---------|
 | `DevOpsAgentReadOnlyPermissions` | The prod base-read policy, verbatim: topology, compute, datastores, messaging, CloudWatch, name-scoped log content, Health/Config, CloudFormation, security/audit surfaces |
 | `DevOpsAgentReadOnlyTroubleshooting` | The prod deep-dive policy, verbatim: network-path drill-down, Reachability, DNS, KMS metadata, `cloudtrail:LookupEvents`, quotas, flow-log content |
-| `pi-coms-dev-extensions` (inline) | Named dev additions: `ce:GetCostAndUsage` (cost check), Bedrock invoke on Anthropic models, scheduling/history reads, `LogContentReads` (FilterLogEvents/GetLogEvents/StartQuery/GetQueryResults), `CertificateReads` (acm:List/DescribeCertificate for the cert-expiry check), and an explicit **Deny** on secret values, `kms:Decrypt`, SSM parameter values, `lambda:GetFunction`, and data-plane gets -- metadata-only made structural |
+| `pi-coms-dev-extensions` (inline) | Named dev additions: `ce:GetCostAndUsage` (cost check), Bedrock invoke on Anthropic models, scheduling/history reads, `LogContentReads` (FilterLogEvents/GetLogEvents/StartQuery/GetQueryResults), `CertificateReads` (acm:List/DescribeCertificate for the cert-expiry check), `AmplifyReads` (amplify:ListJobs/GetJob plus app, branch, and webhook reads for build-history checks), and an explicit **Deny** on secret values, `kms:Decrypt`, SSM parameter values, `lambda:GetFunction`, and data-plane gets -- metadata-only made structural |
 
 One reviewed permission set governs both this fleet and the incident
 analyzer; every check, investigation read, and model call appears in
